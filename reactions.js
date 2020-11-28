@@ -61,14 +61,12 @@ function s(pushbox) {
   if (!activeReaction) {
     throw `Can't subscribe to pushbox; there's no active reaction`
   }
-  const caller = arguments.callee.caller
-
-  console.log(`Checking subscription of ${caller.name} to ${pushbox.id}`)
-  console.log(caller === activeReaction
+  console.log(`Checking subscription of ${s.caller.name} to ${pushbox.id}`)
+  console.log(s.caller === activeReaction
     ? ` - Ok! ${activeReaction.id} 🔗 ${pushbox.id}`
-    : ` - Not allowed, ${caller.name} is not the active reaction`
+    : ` - Not allowed, ${s.caller.name} is not the active reaction`
   )
-  if (caller === activeReaction) {
+  if (s.caller === activeReaction) {
     if (activeReaction.pushboxPassReads.has(pushbox)) {
       throw `Reaction ${activeReaction.id} can't subscribe-read to ${pushbox.id} after pass-reading it; pick one`
     }
