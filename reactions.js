@@ -159,6 +159,14 @@ function DoSomeWork() {
   return count
 }
 
+// TODO: Next is to implement the OK-ing of subscriptions to values that would
+// otherwise be "Not allowed" since caller !== activeReaction
+
+// I think, like sRead, I'll have sAllowedCallers = new Set() and then on
+// runReaction if activeReaction === undefined then that's in sAllowedCallers.
+// All nested reactions/functions will _not_ be in sAllowedCallers unless
+// explicitly s(...)'d in
+
 // Another case to check... If I s(data.count) outside, and then call DoSomeWork
 // which does a read data.count() then does that throw the error about
 // consistency issues? Then what about s(DoSomeWork) case? Maybe s(Fn, [pushbox])
