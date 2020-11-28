@@ -74,11 +74,14 @@ function s(pushbox) {
 }
 
 function createPushbox(value, name) {
+  // Store in a closure and not a property of the pushbox
+  // Reads should always be safe so there's no reason to backdoor it
+  let saved = value
   const pushbox = (...args) => {
     if (args.length) {
       const [valueNext] = args
-      console.log(`SET ${pushbox.id}:`, pushbox.value, '➡', valueNext, `Notifying ${pushbox.reactions.size} reactions`)
-      pushbox.value = valueNext
+      console.log(`Set ${pushbox.id}:`, saved, '➡', valueNext, `Notifying ${pushbox.reactions.size} reactions`)
+      saved = valueNext
       pushbox.reactions.forEach(runReaction)
       // Don't return a value. Keeps it simple if SET doesn't also READ
       return;
@@ -95,10 +98,9 @@ function createPushbox(value, name) {
     } else {
       console.log(`READ ${pushbox.id} with no active reaction`)
     }
-    return pushbox.value
+    return saved
   }
   pushbox.id = `P${pushboxId++}` + (name ? `:${name}` : '');
-  pushbox.value = value
   pushbox.reactions = new Set();
   return pushbox
 }
