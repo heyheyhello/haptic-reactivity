@@ -5,8 +5,7 @@ let reactionId = 0
 
 let reactions = new Set()
 let activeReaction = undefined // `() => void` each runReaction()
-let activeReactionReads = undefined // `new Set()` each runReaction()
-let sAllowRead = false
+let sRead = false
 
 function createReaction(fn) {
   if (reactions.has(fn)) {
@@ -16,10 +15,8 @@ function createReaction(fn) {
     throw `Not allowed nested reactions; active one is ${activeReaction.id}`
   }
   fn.id = `R${reactionId++}:${fn.name || '<Anon>'}`
-  // TODO: Naming? Publisher. Sender. Messenger. Informer. Communicator...
-  // Lots of synonymns but I want to convey that it doesn't _take_ a value from
-  // somewhere, like a postee would take from a mailbox - it _is_ also the box
-  fn.pushboxes = new Set()
+  fn.pushboxSubReads = new Set()
+  fn.pushboxPassReads = new Set()
   fn.runs = 0
   reactions.add(fn)
   const label = `Create ${fn.id}`
@@ -35,18 +32,15 @@ function runReaction(fn) {
   }
   const label = `Run ${fn.id}`
   console.group(label)
-  // TODO: Unsubscribe and rebuild subs
-  const prevAR = activeReaction
-  const prevARR = activeReactionReads
+  const prev = activeReaction
   activeReaction = fn
-  // XXX: This means the system is now less inspectable? Is that worth it...
-  activeReactionReads = new Set()
+  // TODO: Unsubscribe (2way) pushboxSubReads and clear pushboxPassReads
   fn()
   fn.runs++
-  const reads = activeReactionReads.size
-  console.log(`Run ${fn.runs}: ${fn.pushboxes.size}/${fn.pushboxes.size + reads} reads subscribed`)
-  activeReaction = prevAR
-  activeReactionReads = prevARR // GC the Set()
+  const sr = fn.pushboxSubReads.size
+  const pr = fn.pushboxPassReads.size
+  console.log(`Run ${fn.runs}: ${sr}/${sr + pr} reads subscribed`)
+  activeReaction = prev
   console.groupEnd(label)
 }
 
@@ -55,22 +49,24 @@ function s(pushbox) {
     throw `Can't subscribe to pushbox; there's no active reaction`
   }
   const caller = arguments.callee.caller
-  console.log(`Maybe subscribe ${caller.name} to ${pushbox.id}?`)
+
+  console.log(`Checking subscription of ${caller.name} to ${pushbox.id}`)
+  console.log(caller === activeReaction
+    ? ` - Ok! ${activeReaction.id} 🔗 ${pushbox.id}`
+    : ` - Not allowed, ${caller.name} is not the active reaction`
+  )
   if (caller === activeReaction) {
-    console.log(`  Yes! ${activeReaction.id} 🔗 ${pushbox.id}`)
-    if (activeReactionReads.has(pushbox)) {
-      throw `Reaction ${activeReaction.id} can't subscribe to ${pushbox.id} after reading it; pick one`
+    if (activeReaction.pushboxPassReads.has(pushbox)) {
+      throw `Reaction ${activeReaction.id} can't subscribe-read to ${pushbox.id} after pass-reading it; pick one`
     }
     // Add after checking to be idempotent
-    activeReaction.pushboxes.add(pushbox)
+    activeReaction.pushboxSubReads.add(pushbox)
     pushbox.reactions.add(activeReaction)
-  } else {
-    console.log(`  No, ${caller.name} is not the active reaction`)
   }
-  ignoreReadForSubscription = true
-  const valueToFwd = pushbox()
-  ignoreReadForSubscription = false
-  return valueToFwd
+  sRead = true
+  const value = pushbox()
+  sRead = false
+  return value
 }
 
 function createPushbox(value, name) {
@@ -86,17 +82,16 @@ function createPushbox(value, name) {
       // Don't return a value. Keeps it simple if SET doesn't also READ
       return;
     }
-    if (activeReaction) {
-      console.log(`READ ${pushbox.id} with active reaction ${activeReaction.id}`)
-      if (ignoreReadForSubscription === false) {
-        if (activeReaction.pushboxes.has(pushbox)) {
-          throw `Reaction ${activeReaction.id} can't read ${pushbox.id} after subscribing to it; pick one`
-        }
-        // Add after checking to be idempotent
-        activeReactionReads.add(pushbox)
+    console.log(activeReaction
+      ? `Read ${pushbox.id} with active reaction ${activeReaction.id}`
+      : `Read ${pushbox.id} with no active reaction`
+    )
+    if (activeReaction && !sRead) {
+      if (activeReaction.pushboxSubReads.has(pushbox)) {
+        throw `Reaction ${activeReaction.id} can't pass-read ${pushbox.id} after subscribe-reading it; pick one`
       }
-    } else {
-      console.log(`READ ${pushbox.id} with no active reaction`)
+      // Add after checking to be idempotent
+      activeReaction.pushboxPassReads.add(pushbox)
     }
     return saved
   }
