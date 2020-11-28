@@ -1,109 +1,116 @@
 // Signals
 
-let pubId = 0
+let pushboxId = 0
 let reactionId = 0
 
-let reaction = undefined
-let reactionMeta = new Map()
+let reactions = new Set()
+let activeReaction = undefined // `() => void` each runReaction()
+let activeReactionReads = undefined // `new Set()` each runReaction()
 let sAllowRead = false
 
 function createReaction(fn) {
-  const meta = {
-    id: `R${reactionId++} ${fn.name || '<Anon>'}`,
-    subPubs: new Set(),
-    readPubs: new Set(),
-    runCount: 0,
-  };
-  reactionMeta.set(fn, meta)
-  const label = `Create ${meta.id}`
-  console.group(label)
-  if (reaction) {
-    reactionMeta.delete(reaction)
-    throw `Not allowed nested reactions; active one is ${meta.id}`
+  if (reactions.has(fn)) {
+    throw 'Function is already a reaction'
   }
+  if (activeReaction) {
+    throw `Not allowed nested reactions; active one is ${activeReaction.id}`
+  }
+  fn.id = `R${reactionId++}:${fn.name || '<Anon>'}`
+  // TODO: Naming? Publisher. Sender. Messenger. Informer. Communicator...
+  // Lots of synonymns but I want to convey that it doesn't _take_ a value from
+  // somewhere, like a postee would take from a mailbox - it _is_ also the box
+  fn.pushboxes = new Set()
+  fn.runs = 0
+  reactions.add(fn)
+  const label = `Create ${fn.id}`
+  console.group(label)
   runReaction(fn)
   console.groupEnd(label)
   return fn;
 }
 
 function runReaction(fn) {
-  const meta = reactionMeta.get(fn);
-  if (!meta) {
-    throw `No such reaction for given function`
+  if (!reactions.has(fn)) {
+    throw `Function isn't a reaction`
   }
-  const label = `Run ${meta.id}`
-  // TODO: Unsubscribe and rebuild subPubs
-  const reactionPrev = reaction
-  reaction = fn
+  const label = `Run ${fn.id}`
   console.group(label)
+  // TODO: Unsubscribe and rebuild subs
+  const prevAR = activeReaction
+  const prevARR = activeReactionReads
+  activeReaction = fn
+  // XXX: This means the system is now less inspectable? Is that worth it...
+  activeReactionReads = new Set()
   fn()
-  reaction = reactionPrev
-  meta.runCount++
-  console.log(`Runs ${meta.runCount}; SubPubs ${meta.subPubs.size}; ReadPubs ${meta.readPubs.size}`)
+  fn.runs++
+  const reads = activeReactionReads.size
+  console.log(`Run ${fn.runs}: ${fn.pushboxes.size}/${fn.pushboxes.size + reads} reads subscribed`)
+  activeReaction = prevAR
+  activeReactionReads = prevARR // GC the Set()
   console.groupEnd(label)
 }
 
-function s(pub) {
-  if (!reaction) {
-    throw 'No active reaction to subscribe a publisher to'
+function s(pushbox) {
+  if (!activeReaction) {
+    throw `Can't subscribe to pushbox; there's no active reaction`
   }
   const caller = arguments.callee.caller
-  console.log(`Maybe subcribe ${pub.id} to ${caller.name}?`)
-  if (caller === reaction) {
-    const meta = reactionMeta.get(reaction)
-    console.log(`  Yes! ${pub.id} 🔗 ${meta.id}`)
-    if (meta.readPubs.has(reaction)) {
-      throw `Reaction, ${meta.id}, is trying to sub to ${k} that was read previously; pick one to be consistent`
+  console.log(`Maybe subscribe ${caller.name} to ${pushbox.id}?`)
+  if (caller === activeReaction) {
+    console.log(`  Yes! ${activeReaction.id} 🔗 ${pushbox.id}`)
+    if (activeReactionReads.has(pushbox)) {
+      throw `Reaction ${activeReaction.id} can't subscribe to ${pushbox.id} after reading it; pick one`
     }
     // Add after checking to be idempotent
-    meta.subPubs.add(pub)
-    pub.subscribers.add(reaction)
+    activeReaction.pushboxes.add(pushbox)
+    pushbox.reactions.add(activeReaction)
   } else {
     console.log(`  No, ${caller.name} is not the active reaction`)
   }
-  sAllowRead = true
-  const valueToFwd = pub()
-  sAllowRead = false
+  ignoreReadForSubscription = true
+  const valueToFwd = pushbox()
+  ignoreReadForSubscription = false
   return valueToFwd
 }
 
-function createPub(value, name) {
-  const pub = (...args) => {
+function createPushbox(value, name) {
+  const pushbox = (...args) => {
     if (args.length) {
       const [valueNext] = args
-      console.log(`SET ${pub.id}:`, pub.value, '➡', valueNext, `Notifying ${pub.subscribers.size} reactions`)
-      pub.value = valueNext
-      pub.subscribers.forEach(runReaction)
+      console.log(`SET ${pushbox.id}:`, pushbox.value, '➡', valueNext, `Notifying ${pushbox.reactions.size} reactions`)
+      pushbox.value = valueNext
+      pushbox.reactions.forEach(runReaction)
       // Don't return a value. Keeps it simple if SET doesn't also READ
       return;
     }
-    if (reaction) {
-      const meta = reactionMeta.get(reaction)
-      console.log(`READ ${pub.id} with active reaction ${meta.id}`)
-      if (sAllowRead === false && meta.subPubs.has(pub)) {
-        throw `Reaction, ${meta.id}, is trying to read ${pub.id} that was subbed previously; pick one to be consistent`
+    if (activeReaction) {
+      console.log(`READ ${pushbox.id} with active reaction ${activeReaction.id}`)
+      if (ignoreReadForSubscription === false) {
+        if (activeReaction.pushboxes.has(pushbox)) {
+          throw `Reaction ${activeReaction.id} can't read ${pushbox.id} after subscribing to it; pick one`
+        }
+        // Add after checking to be idempotent
+        activeReactionReads.add(pushbox)
       }
-      // Add after checking to be idempotent
-      meta.readPubs.add(pub)
     } else {
-      console.log(`READ ${pub.id} with no active reaction`)
+      console.log(`READ ${pushbox.id} with no active reaction`)
     }
-    return pub.value
+    return pushbox.value
   }
-  pub.id = `P${pubId++}` + name ? ` ${name}` : '';
-  pub.value = value
-  pub.subscribers = new Set();
-  return pub
+  pushbox.id = `P${pushboxId++}` + (name ? `:${name}` : '');
+  pushbox.value = value
+  pushbox.reactions = new Set();
+  return pushbox
 }
 
-function createPubBundle(bundle) {
+function createPushboxes(bundle) {
   for (const [k,v] of Object.entries(bundle)) {
-    bundle[k] = createPub(v, k);
+    bundle[k] = createPushbox(v, k);
   }
   return bundle
 }
 
-const data = createPubBundle({
+const data = createPushboxes({
   label: 'Default',
   count: 10,
   countMax: 100,
@@ -112,8 +119,8 @@ const data = createPubBundle({
 })
 
 data.label('Something nice')
-console.log('Read from label:', data.label())
-console.log('Read from wsMessages:', data.wsMessages())
+console.log('Get label:', data.label())
+console.log('Get wsMessages:', data.wsMessages())
 
 function addLog(msg) {
   data.wsMessages(data.wsMessages().concat(msg))
@@ -137,14 +144,14 @@ data.label('Writing a new label calls DoComp which then also calls WriteLog')
 function DoSomeWork() {
   console.log('Trying to read from data.count')
   // This line is sketchy. It's s() outside of a createReaction call...
-  const badCount = s(data.count) * 10 + data.countMax()
-  const count = data.count() * 10 + data.countMax()
+  const countA = s(data.count) * 10 + data.countMax()
+  const countB = data.count() * 10 + data.countMax()
   return count
 }
 
 // Another case to check... If I s(data.count) outside, and then call DoSomeWork
 // which does a read data.count() then does that throw the error about
-// consistency issues? Then what about s(DoSomeWork) case? Maybe s(Fn, [pub])
+// consistency issues? Then what about s(DoSomeWork) case? Maybe s(Fn, [pushbox])
 
 DoSomeWork() // Error as s(data.count); OK as data.count()
 createReaction(DoSomeWork) // Works as s(data.count); Useless as data.count()
@@ -158,9 +165,9 @@ data.count(data.count() + 1)
 createReaction(() => {
   console.log('This one is interested in data.list, so it will sub to that')
   console.log(data.list().reduce((acc, now) => acc + String(now), ''))
-  console.log('Then I\'ll try to do some work')
+  console.log(`Then I'll try to do some work`)
   // Safe
-  const safeCount = DoSomeWork()
+  const countA = DoSomeWork()
   // Opt-in subscribe version
-  const count = s(DoSomeWork)
+  const countB = s(DoSomeWork)
 })
