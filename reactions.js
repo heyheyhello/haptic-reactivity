@@ -34,11 +34,24 @@ function runReaction(fn) {
   console.group(label)
   const prev = activeReaction
   activeReaction = fn
-  // TODO: Unsubscribe (2way) pushboxSubReads and clear pushboxPassReads
+  // For cleanup
+  const prevSubs = new Set(fn.pushboxSubReads)
+  // TODO: This causes an infinite loop? Why?
+  // fn.pushboxSubReads.forEach(pushbox => pushbox.reactions.delete(fn) })
+  fn.pushboxSubReads.clear()
+  fn.pushboxPassReads.clear()
   fn()
   fn.runs++
   const sr = fn.pushboxSubReads.size
   const pr = fn.pushboxPassReads.size
+  // ASSUMPTION: If a reaction runs and doesn't sub a previously subbed pushbox
+  // then that box doesn't need to run the reaction anymore
+  fn.pushboxSubReads.forEach(pushbox => {
+    if (prevSubs.delete(pushbox)) {
+      console.log(`Unsubscribing from pushbox ${pushbox.id}`)
+      pushbox.reactions.delete(fn)
+    }
+  })
   console.log(`Run ${fn.runs}: ${sr}/${sr + pr} reads subscribed`)
   activeReaction = prev
   console.groupEnd(label)
