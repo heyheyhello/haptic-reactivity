@@ -147,15 +147,25 @@ createReaction(function DoComputation() {
 addLog('I can update the log and it calls WriteLog but leaves DoComp alone')
 data.label('Writing a new label calls DoComp which then also calls WriteLog')
 
-// Hmm ok. So. Do I make it that DoSomeWork() fails but then if I do
-// s(DoSomeWork) does that subscribe to data.count()?... Seems weird.
+// Ok! Let's talk about nesting subscriptions and how to be informed and safe
+// when calling functions from within your reactions
+
 function DoSomeWork() {
   console.log('Trying to read from data.count')
-  // This line is sketchy. It's s() outside of a createReaction call...
+  // This line makes this function a bit different. It's an s(...) outside of a
+  // createReaction call, so DoSomeWork() throws an error. You have to either
+  // pass this _directly_ into a createReaction or use sIgnore() or sFrom()
   const countA = s(data.count) * 10 + data.countMax()
+  // Note that if the line was written without s(...) there's no issue. Then
+  // this is just a normal function
   const countB = data.count() * 10 + data.countMax()
   return count
 }
+
+// This isn't bad tho! It's actually the main way Haptic does reactivity in JSX
+// via <p>Hey {() => s(data.list).join(', ')}</p>. That's snippet isn't a
+// reaction itself but is called later during a DOM updating reaction that uses
+// the sFrom() method to register its subscriptions
 
 // TODO: Next is to implement the OK-ing of subscriptions to values that would
 // otherwise be "Not allowed" since caller !== activeReaction
@@ -165,16 +175,24 @@ function DoSomeWork() {
 // All nested reactions/functions will _not_ be in sAllowedCallers unless
 // explicitly s(...)'d in
 
-// Another case to check... If I s(data.count) outside, and then call DoSomeWork
-// which does a read data.count() then does that throw the error about
-// consistency issues? Then what about s(DoSomeWork) case? Maybe s(Fn, [pushbox])
+// Remember that reactions have consistency restrictions for pass-reading or
+// subscribe-reading a pushbox. However, this is bordered at the function
+// boundary. Each function call has its own consistency checks. If you have a
+// subscribe-read to s(data.count) at the top level and then use SomeFunction()
+// which has no subscriptions but does a pass-read to data.count(), that's OK.
+// However, if SomeFunction contained an s() then you can't simply call it;
+// you'll get an error. Instead you need to decide to use either sIgnore() or
+// sFrom(). Using sIgnore frees you of any consistency checks and SomeFunction
+// can be thought to contain no subscriptions. If you use sFrom, then the inner
+// subscriptions are moved into your scope, so the consistency checks apply.
 
 DoSomeWork() // Error as s(data.count); OK as data.count()
+sIgnore(DoSomeWork) // OK. This is helpful for console debugging etc.
+sFrom(DoSomeWork) // Error since the resulting subscriptions have no reactions
 createReaction(DoSomeWork) // Works as s(data.count); Useless as data.count()
 
-createReaction(() => s(DoSomeWork)) // If s(data.count) ... hmm. I think throw. No nests!
-createReaction(() => s(DoSomeWork, [data.count]))
-createReaction(() => s(DoSomeWork, [data.count, data.countMax])) // === s(DoSomeWork)
+createReaction(() => document.appendChild(document.createTextNode(700 * sFrom(DoSomeWork) + '%')))
+// TODO: Just make sure there's subscription consent all the way down the tree...
 
 data.count(data.count() + 1)
 
@@ -182,8 +200,16 @@ createReaction(() => {
   console.log('This one is interested in data.list, so it will sub to that')
   console.log(data.list().reduce((acc, now) => acc + String(now), ''))
   console.log(`Then I'll try to do some work`)
-  // Safe
+
+  // Safe: Any inner subscriptions will throw an error to make sure the dev is
+  // informed when deciding how to proceed
   const countA = DoSomeWork()
-  // Opt-in subscribe version
-  const countB = s(DoSomeWork)
+
+  // Opt-out version: Doesn't throw for inner subscriptions; ignores s()/sFrom()
+  // calls deeper in the tree
+  const countB = sIgnore(DoSomeWork)
+
+  // Opt-in version: Doesn't throw for inner subscriptions; s()/sFrom() calls
+  // are subscribed to unless an sIgnore() is reached
+  const countC = sFrom(DoSomeWork)
 })
