@@ -73,6 +73,7 @@ function runReaction(fn) {
 }
 
 function s(box) {
+  // XXX: Depends if sIgnore() is removed and made implicit...
   if (!activeReaction) {
     throw `Can't subscribe to box; there's no active reaction`
   }
