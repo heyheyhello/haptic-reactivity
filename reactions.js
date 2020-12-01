@@ -17,15 +17,21 @@ let boxId = 0
 let reactionId = 0
 
 let reactions = new Set()
-let activeReaction = undefined // `() => void` each runReaction()
-let sRead = false
+// The reaction to bind subs to. See runReaction
+let activeReaction = undefined
+// When true a box read is happening from as part of `s(box)` instead of `box()`
+let sBoxRead = false
+// Prevent s() from working outside activeReaction. See runReaction and sFrom
+let sAllowedCaller = undefined
+// Escape hatch to prevent any s() and sFrom() behaviour
+let sIgnoreMode = false
 
 function createReaction(fn) {
   if (reactions.has(fn)) {
-    throw 'Function is already a reaction'
+    throw new Error(`Function is already a reaction as ${fn.id}`)
   }
   if (activeReaction) {
-    throw `Not allowed nested reactions; active one is ${activeReaction.id}`
+    throw new Error(`Not allowed nested reactions; active one is ${activeReaction.id}`)
   }
   fn.id = `R${reactionId++}:${fn.name || '<Anon>'}`
   fn.reactionSubReads = new Set() // Set<Box>
@@ -41,12 +47,14 @@ function createReaction(fn) {
 
 function runReaction(fn) {
   if (!reactions.has(fn)) {
-    throw `Function isn't a reaction`
+    throw new Error(`Function isn't a reaction`)
   }
   const label = `Run ${fn.id}`
   console.group(label)
-  const prev = activeReaction
+  const prevAR = activeReaction
   activeReaction = fn
+  const prevAC = sAllowedCaller
+  sAllowedCaller = fn
   // For cleanup
   const prevSubs = new Set(fn.reactionSubReads)
   // TODO: This causes an infinite loop? Why?
@@ -58,7 +66,8 @@ function runReaction(fn) {
   const sr = fn.reactionSubReads.size
   const pr = fn.reactionPassReads.size
   console.log(`Run ${fn.runs}: ${sr}/${sr + pr} reads subscribed`)
-  activeReaction = prev
+  activeReaction = prevAR
+  sAllowedCaller = prevAC
   // If a reaction doesn't sub a previously subbed box then that box doesn't
   // need to run the reaction anymore
   fn.reactionSubReads.forEach(box => prevSubs.delete(box))
@@ -80,27 +89,58 @@ function removeReaction(fn) {
 }
 
 function s(box) {
-  // XXX: Depends if sIgnore() is removed and made implicit...
-  if (!activeReaction) {
-    throw `Can't subscribe to box; there's no active reaction`
+  if (!box.id || !box.reactions) {
+    throw new Error(`Parameter isn't a box`)
   }
-  console.log(`Checking subscription of ${s.caller.name} to ${box.id}`)
-  console.log(s.caller === activeReaction
+  // TODO: This...escapes too early. I want to run subscriptions so I can do
+  // consistency checks but store them into new sets that I discard afterwards
+  if (sIgnoreMode) {
+    return box() // Pass-read
+  }
+  if (!activeReaction) {
+    throw new Error(`Can't subscribe to box; there's no active reaction`)
+  }
+  console.log(`Checking if caller "${s.caller.name}" === sAllowedCaller "${sAllowedCaller.name}"`)
+  console.log(s.caller === sAllowedCaller
     ? ` - Ok! ${activeReaction.id} 🔗 ${box.id}`
     : ` - Not allowed, ${s.caller.name} is not the active reaction`
   )
-  if (s.caller === activeReaction) {
+  if (s.caller === sAllowedCaller) {
     if (activeReaction.reactionPassReads.has(box)) {
-      throw `Reaction ${activeReaction.id} can't subscribe-read to ${box.id} after pass-reading it; pick one`
+      throw new Error(`Reaction ${activeReaction.id} can't subscribe-read to ${box.id} after pass-reading it; pick one`)
     }
     // Add after checking to be idempotent
     activeReaction.reactionSubReads.add(box)
     box.reactions.add(activeReaction)
   }
-  sRead = true
+  sBoxRead = true
   const value = box()
-  sRead = false
+  sBoxRead = false
   return value
+}
+
+function sFrom(fn) {
+  console.group('sFrom')
+  // Note that when sIgnoreMode is on then sAllowedCaller is never used
+  prevCaller = sAllowedCaller
+  sAllowedCaller = fn
+  try {
+    fn()
+  } finally {
+    sAllowedCaller = prevCaller
+    console.groupEnd('sFrom')
+  }
+}
+
+function sIgnore(fn) {
+  console.group('sIgnore')
+  sIgnoreMode = true
+  try {
+    fn()
+  } finally {
+    sIgnoreMode = false
+    console.groupEnd('sIgnore')
+  }
 }
 
 function createBox(value, name) {
@@ -110,19 +150,22 @@ function createBox(value, name) {
   const box = (...args) => {
     if (args.length) {
       const [valueNext] = args
-      console.log(`Set ${box.id}:`, saved, '➡', valueNext, `Notifying ${box.reactions.size} reactions`)
+      console.log(`Write ${box.id}:`, saved, '➡', valueNext, `Notifying ${box.reactions.size} reactions`)
       saved = valueNext
       box.reactions.forEach(runReaction)
-      // Don't return a value. Keeps it simple if SET doesn't also READ
+      // Don't return a value. Keeps it simple if write doesn't also read
       return;
     }
+    // TODO: Clarify when sIgnoreMode is causing a fake sub-read
     console.log(activeReaction
-      ? `Read ${box.id} with active reaction ${activeReaction.id}`
-      : `Read ${box.id} with no active reaction`
+      ? sBoxRead
+        ? `Sub-read ${box.id}; Active reaction ${activeReaction.id}`
+        : `Pass-read ${box.id}; Active reaction ${activeReaction.id}`
+      : `Pass-read ${box.id}. No active reaction`
     )
-    if (activeReaction && !sRead) {
+    if (activeReaction && !sBoxRead) {
       if (activeReaction.reactionSubReads.has(box)) {
-        throw `Reaction ${activeReaction.id} can't pass-read ${box.id} after subscribe-reading it; pick one`
+        throw new Error(`Reaction ${activeReaction.id} can't pass-read ${box.id} after subscribe-reading it; pick one`)
       }
       // Add after checking to be idempotent
       activeReaction.reactionPassReads.add(box)
@@ -182,7 +225,6 @@ function DoSomeWork() {
   // Note that if the line was written without s(...) there's no issue. Then
   // this is just a normal function
   const countB = data.count() * 10 + data.countMax()
-  return count
 }
 
 // This isn't bad tho! It's actually the main way Haptic does reactivity in JSX
@@ -208,10 +250,21 @@ function DoSomeWork() {
 // sFrom(). Using sIgnore frees you of any consistency checks and SomeFunction
 // can be thought to contain no subscriptions. If you use sFrom, then the inner
 // subscriptions are moved into your scope, so the consistency checks apply.
+try {
+  DoSomeWork() // Error as s(data.count); OK as data.count()
+} catch (err) {
+  console.log('Thrown', err.message)
+}
+try {
+  sFrom(DoSomeWork) // Error since the resulting subscriptions have no reactions
+} catch (err) {
+  console.log('Thrown', err.message)
+}
 
-DoSomeWork() // Error as s(data.count); OK as data.count()
+// TODO: sIgnore doesn't enforce consistency checks because it escape hatches
+// too early. Should instead gather subs/passes and then throw them out later
+
 sIgnore(DoSomeWork) // OK. This is helpful for console debugging etc.
-sFrom(DoSomeWork) // Error since the resulting subscriptions have no reactions
 createReaction(DoSomeWork) // Works as s(data.count); Useless as data.count()
 
 createReaction(() => document.appendChild(document.createTextNode(700 * sFrom(DoSomeWork) + '%')))
