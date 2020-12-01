@@ -5,12 +5,10 @@
 // neutral way, called a pass-read, or, in a way that subscribes them to box
 // updates, called a subscribe-read. Writing a value to a box causes it to call
 // all subscribed reactions (the push), even if the value hasn't changed. Each
-// time a reaction runs its current subscribe-reads are compared to the previous
-// run to automatically unsubscribe from boxes that aren't used.
-
-// TODO: Not implemented: If there are no subscriptions during a run then the
-// reaction is deleted to help GC free the instance (assuming the application
-// doesn't hold other references to call manually)
+// time a reaction runs it reads from boxes (pull). Its subscribe-reads are
+// compared to those of its previous run and unused boxes are automatically
+// unsubscribed. If there are no more subscriptions after a run then the
+// reaction is deleted.
 
 // Explicit subscriptions avoid accidental reaction calls that were an issue in
 // Haptic's previous "Signal" reactivity model (from Sinuous/Solid/S.js)
@@ -59,17 +57,26 @@ function runReaction(fn) {
   fn.runs++
   const sr = fn.reactionSubReads.size
   const pr = fn.reactionPassReads.size
-  // ASSUMPTION: If a reaction runs and doesn't sub a previously subbed box
-  // then that box doesn't need to run the reaction anymore
-  fn.reactionSubReads.forEach(box => {
-    if (prevSubs.delete(box)) {
-      console.log(`Unsubscribing from box ${box.id}`)
-      box.reactions.delete(fn)
-    }
-  })
   console.log(`Run ${fn.runs}: ${sr}/${sr + pr} reads subscribed`)
   activeReaction = prev
+  // If a reaction doesn't sub a previously subbed box then that box doesn't
+  // need to run the reaction anymore
+  fn.reactionSubReads.forEach(box => prevSubs.delete(box))
+  prevSubs.forEach(box => {
+    console.log(`Unsubscribing from unused box ${box.id}`)
+    box.reactions.delete(fn)
+  })
+  if (fn.reactionSubReads.size === 0) {
+    removeReaction(fn)
+  }
   console.groupEnd(label)
+}
+
+function removeReaction(fn) {
+  reactions.delete(fn)
+  // Leave the fn.id and fn.runs so people can see what run it ended on
+  delete fn.reactionSubReads
+  delete fn.reactionPassReads
 }
 
 function s(box) {
