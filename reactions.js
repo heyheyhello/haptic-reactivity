@@ -1,6 +1,21 @@
-// Signals
+// Haptic's reactivity engine
 
-let pushboxId = 0
+// Implements the push-pull reactive programming model. Uses "Boxes" to store
+// data and "Reaction" functions which do work. Reactions can read boxes in a
+// neutral way, called a pass-read, or, in a way that subscribes them to box
+// updates, called a subscribe-read. Writing a value to a box causes it to call
+// all subscribed reactions (the push), even if the value hasn't changed. Each
+// time a reaction runs its current subscribe-reads are compared to the previous
+// run to automatically unsubscribe from boxes that aren't used.
+
+// TODO: Not implemented: If there are no subscriptions during a run then the
+// reaction is deleted to help GC free the instance (assuming the application
+// doesn't hold other references to call manually)
+
+// Explicit subscriptions avoid accidental reaction calls that were an issue in
+// Haptic's previous "Signal" reactivity model (from Sinuous/Solid/S.js)
+
+let boxId = 0
 let reactionId = 0
 
 let reactions = new Set()
@@ -15,8 +30,8 @@ function createReaction(fn) {
     throw `Not allowed nested reactions; active one is ${activeReaction.id}`
   }
   fn.id = `R${reactionId++}:${fn.name || '<Anon>'}`
-  fn.pushboxSubReads = new Set()
-  fn.pushboxPassReads = new Set()
+  fn.reactionSubReads = new Set() // Set<Box>
+  fn.reactionPassReads = new Set() // Set<Box>
   fn.runs = 0
   reactions.add(fn)
   const label = `Create ${fn.id}`
@@ -35,21 +50,21 @@ function runReaction(fn) {
   const prev = activeReaction
   activeReaction = fn
   // For cleanup
-  const prevSubs = new Set(fn.pushboxSubReads)
+  const prevSubs = new Set(fn.reactionSubReads)
   // TODO: This causes an infinite loop? Why?
-  // fn.pushboxSubReads.forEach(pushbox => pushbox.reactions.delete(fn) })
-  fn.pushboxSubReads.clear()
-  fn.pushboxPassReads.clear()
+  // fn.reactionSubReads.forEach(box => box.reactions.delete(fn) })
+  fn.reactionSubReads.clear()
+  fn.reactionPassReads.clear()
   fn()
   fn.runs++
-  const sr = fn.pushboxSubReads.size
-  const pr = fn.pushboxPassReads.size
-  // ASSUMPTION: If a reaction runs and doesn't sub a previously subbed pushbox
+  const sr = fn.reactionSubReads.size
+  const pr = fn.reactionPassReads.size
+  // ASSUMPTION: If a reaction runs and doesn't sub a previously subbed box
   // then that box doesn't need to run the reaction anymore
-  fn.pushboxSubReads.forEach(pushbox => {
-    if (prevSubs.delete(pushbox)) {
-      console.log(`Unsubscribing from pushbox ${pushbox.id}`)
-      pushbox.reactions.delete(fn)
+  fn.reactionSubReads.forEach(box => {
+    if (prevSubs.delete(box)) {
+      console.log(`Unsubscribing from box ${box.id}`)
+      box.reactions.delete(fn)
     }
   })
   console.log(`Run ${fn.runs}: ${sr}/${sr + pr} reads subscribed`)
@@ -57,68 +72,68 @@ function runReaction(fn) {
   console.groupEnd(label)
 }
 
-function s(pushbox) {
+function s(box) {
   if (!activeReaction) {
-    throw `Can't subscribe to pushbox; there's no active reaction`
+    throw `Can't subscribe to box; there's no active reaction`
   }
-  console.log(`Checking subscription of ${s.caller.name} to ${pushbox.id}`)
+  console.log(`Checking subscription of ${s.caller.name} to ${box.id}`)
   console.log(s.caller === activeReaction
-    ? ` - Ok! ${activeReaction.id} 🔗 ${pushbox.id}`
+    ? ` - Ok! ${activeReaction.id} 🔗 ${box.id}`
     : ` - Not allowed, ${s.caller.name} is not the active reaction`
   )
   if (s.caller === activeReaction) {
-    if (activeReaction.pushboxPassReads.has(pushbox)) {
-      throw `Reaction ${activeReaction.id} can't subscribe-read to ${pushbox.id} after pass-reading it; pick one`
+    if (activeReaction.reactionPassReads.has(box)) {
+      throw `Reaction ${activeReaction.id} can't subscribe-read to ${box.id} after pass-reading it; pick one`
     }
     // Add after checking to be idempotent
-    activeReaction.pushboxSubReads.add(pushbox)
-    pushbox.reactions.add(activeReaction)
+    activeReaction.reactionSubReads.add(box)
+    box.reactions.add(activeReaction)
   }
   sRead = true
-  const value = pushbox()
+  const value = box()
   sRead = false
   return value
 }
 
-function createPushbox(value, name) {
-  // Store in a closure and not a property of the pushbox
+function createBox(value, name) {
+  // Store in a closure and not a property of the box
   // Reads should always be safe so there's no reason to backdoor it
   let saved = value
-  const pushbox = (...args) => {
+  const box = (...args) => {
     if (args.length) {
       const [valueNext] = args
-      console.log(`Set ${pushbox.id}:`, saved, '➡', valueNext, `Notifying ${pushbox.reactions.size} reactions`)
+      console.log(`Set ${box.id}:`, saved, '➡', valueNext, `Notifying ${box.reactions.size} reactions`)
       saved = valueNext
-      pushbox.reactions.forEach(runReaction)
+      box.reactions.forEach(runReaction)
       // Don't return a value. Keeps it simple if SET doesn't also READ
       return;
     }
     console.log(activeReaction
-      ? `Read ${pushbox.id} with active reaction ${activeReaction.id}`
-      : `Read ${pushbox.id} with no active reaction`
+      ? `Read ${box.id} with active reaction ${activeReaction.id}`
+      : `Read ${box.id} with no active reaction`
     )
     if (activeReaction && !sRead) {
-      if (activeReaction.pushboxSubReads.has(pushbox)) {
-        throw `Reaction ${activeReaction.id} can't pass-read ${pushbox.id} after subscribe-reading it; pick one`
+      if (activeReaction.reactionSubReads.has(box)) {
+        throw `Reaction ${activeReaction.id} can't pass-read ${box.id} after subscribe-reading it; pick one`
       }
       // Add after checking to be idempotent
-      activeReaction.pushboxPassReads.add(pushbox)
+      activeReaction.reactionPassReads.add(box)
     }
     return saved
   }
-  pushbox.id = `P${pushboxId++}` + (name ? `:${name}` : '');
-  pushbox.reactions = new Set();
-  return pushbox
+  box.id = `B${boxId++}` + (name ? `:${name}` : '');
+  box.reactions = new Set();
+  return box
 }
 
-function createPushboxes(bundle) {
+function createNamedBoxes(bundle) {
   for (const [k,v] of Object.entries(bundle)) {
-    bundle[k] = createPushbox(v, k);
+    bundle[k] = createBox(v, k);
   }
   return bundle
 }
 
-const data = createPushboxes({
+const data = createNamedBoxes({
   label: 'Default',
   count: 10,
   countMax: 100,
@@ -176,7 +191,7 @@ function DoSomeWork() {
 // explicitly s(...)'d in
 
 // Remember that reactions have consistency restrictions for pass-reading or
-// subscribe-reading a pushbox. However, this is bordered at the function
+// subscribe-reading reactive boxes. However, this is bordered at the function
 // boundary. Each function call has its own consistency checks. If you have a
 // subscribe-read to s(data.count) at the top level and then use SomeFunction()
 // which has no subscriptions but does a pass-read to data.count(), that's OK.
