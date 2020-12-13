@@ -141,6 +141,8 @@ function captureSubscriptions(fn) {
     delete fn.reactionSubbedReads;
     delete fn.reactionPassedReads;
     // TODO: Not happy about object passing as an intermediate...
+    // Also wow neat! ESLint telling me good stuff...
+    // eslint-disable-next-line no-unsafe-finally
     return { value, capture };
   }
 }

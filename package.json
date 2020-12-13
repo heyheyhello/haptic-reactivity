@@ -3,6 +3,7 @@
   "version": "0.0.0",
   "description": "Reactive programming via push/pull model",
   "main": "test.js",
+  "type": "module",
   "directories": {
     "test": "test"
   },

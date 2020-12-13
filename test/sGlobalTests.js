@@ -1,3 +1,4 @@
+/* eslint-disable no-unused-vars */
 import { createNamedBoxes, createReaction, s, sFrom, sIgnore } from '../src/sGlobal.js';
 
 const data = createNamedBoxes({
