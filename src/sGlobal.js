@@ -213,12 +213,13 @@ function createNamedBoxes(bundle) {
   return bundle;
 }
 
-export {
+module.exports = {
+  reactions,
   createReaction,
   removeReaction,
   createBox,
   createNamedBoxes,
   s,
   sFrom,
-  sIgnore
+  sIgnore,
 };

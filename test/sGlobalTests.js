@@ -1,132 +1,301 @@
 /* eslint-disable no-unused-vars */
-import { createNamedBoxes, createReaction, s, sFrom, sIgnore } from '../src/sGlobal.js';
+const o = require('ospec');
 
-const data = createNamedBoxes({
-  label: 'Default',
-  count: 10,
-  countMax: 100,
-  list: ['Hi!'],
-  wsMessages: [],
-});
+const {
+  reactions,
+  createBox,
+  createNamedBoxes,
+  createReaction,
+  s,
+  sFrom,
+  sIgnore,
+} = require('../src/sGlobal.js');
 
-data.label('Something nice');
-console.log('Get label:', data.label());
-console.log('Get wsMessages:', data.wsMessages());
+o.spec('haptic-reactivity', function() {
+  o('box creation', function() {
+    let data;
 
-function addLog(msg) {
-  data.wsMessages(data.wsMessages().concat(msg));
-}
+    data = createBox('');
+    o(/^B\d+$/.test(data.id)).equals(true);
 
-let logWrites = 0;
-createReaction(function WriteLog() {
-  console.log(`Here's the new log! WriteLog#${++logWrites}: ${s(data.wsMessages).length} items\n  - ${s(data.wsMessages).join('\n  - ')}`);
-});
+    data = createBox('', 'withName');
+    o(/^B\d+:withName$/.test(data.id)).equals(true);
 
-createReaction(function DoComputation() {
-  addLog(`DoComputation is updating: ${data.count()}`);
-  console.log(data.count() + data.list()[0] + s(data.label));
-});
+    data = createNamedBoxes({
+      label: '💕',
+    });
+    o(data.id).equals(undefined);
+    o(/^B\d+:label$/.test(data.label.id)).equals(true);
+  });
 
-addLog('I can update the log and it calls WriteLog but leaves DoComp alone');
-data.label('Writing a new label calls DoComp which then also calls WriteLog');
+  o('box creation by reference', function() {
+    let data;
+    let ref = {
+      label: '💕',
+      count: 0,
+      wsMessages: [],
+    };
+    data = createNamedBoxes(ref);
+    o(data).equals(ref)`Box reference doesn't change`;
+  });
 
-// Ok! Let's talk about nesting subscriptions and how to be informed and safe
-// when calling functions from within your reactions
+  o('box read/write', function() {
+    let data = createNamedBoxes({ label: '💕' });
+    o(data.label()).equals('💕')`Read works`;
+    o(data.label('...')).equals(void 0)`Writing a value returns nothing/void`;
+    o(data.label()).equals('...')`Writing then reading works`;
+  });
 
-function DoSomeWork() {
-  console.log('Trying to read from data.count');
-  // This line makes this function a bit different. It's an s(...) outside of a
-  // createReaction call, so DoSomeWork() throws an error. You have to either
-  // pass this _directly_ into a createReaction or use sIgnore() or sFrom()
-  const countA = s(data.count) * 10 + data.countMax();
-  // Note that if the line was written without s(...) there's no issue. Then
-  // this is just a normal function
-  const countB = data.count() * 10 + data.countMax();
-}
+  o('reaction creation', function() {
+    let data = createNamedBoxes({ count: 0 });
+    let R = createReaction(() => {
+      // Required else the reaction automatically removes itself
+      s(data.count);
+    });
+    o(reactions.has(R)).equals(true);
+    o(R.id).equals('R0:<Anon>')`Reaction naming for anonymous function works`;
+  });
 
-// This isn't bad tho! It's actually the main way Haptic does reactivity in JSX
-// via <p>Hey {() => s(data.list).join(', ')}</p>. That's snippet isn't a
-// reaction itself but is called later during a DOM updating reaction that uses
-// the sFrom() method to register its subscriptions
+  o('reaction creation by reference', function() {
+    let data = createNamedBoxes({ count: 0 });
+    function refFunction() {
+      s(data.count);
+    }
+    let R = createReaction(refFunction);
+    o(R).equals(refFunction)`Reaction reference doesn't change`;
+    o(R.id).equals('R1:refFunction')`Reaction naming for named functions works`;
+  });
 
-// TODO: Next is to implement the OK-ing of subscriptions to values that would
-// otherwise be "Not allowed" since caller !== activeReaction
+  o('reaction automatically removed', function() {
+    let R = createReaction(() => {});
+    o(reactions.has(R)).equals(false);
+  });
 
-// I think, like sRead, I'll have sAllowedCallers = new Set() and then on
-// runReaction if activeReaction === undefined then that's in sAllowedCallers.
-// All nested reactions/functions will _not_ be in sAllowedCallers unless
-// explicitly s(...)'d in
+  o.spec('reaction reads', function() {
+    let data = createNamedBoxes({
+      label: '!!!',
+      count: 0,
+    });
 
-// Remember that reactions have consistency restrictions for pass-reading or
-// subscribe-reading reactive boxes. However, this is bordered at the function
-// boundary. Each function call has its own consistency checks. If you have a
-// subscribe-read to s(data.count) at the top level and then use SomeFunction()
-// which has no subscriptions but does a pass-read to data.count(), that's OK.
-// However, if SomeFunction contained an s() then you can't simply call it;
-// you'll get an error. Instead you need to decide to use either sIgnore() or
-// sFrom(). Using sIgnore frees you of any consistency checks and SomeFunction
-// can be thought to contain no subscriptions. If you use sFrom, then the inner
-// subscriptions are moved into your scope, so the consistency checks apply.
-try {
-  DoSomeWork(); // Error as s(data.count); OK as data.count()
-} catch (err) {
-  console.log('Thrown', err.message);
-}
-try {
-  sFrom(DoSomeWork); // Error since the resulting subscriptions have no reactions
-} catch (err) {
-  console.log('Thrown', err.message);
-}
-try {
-  sIgnore(DoSomeWork); // OK. Error is due to consistency check failing in DoWork
-} catch (err) {
-  console.log('Thrown', err.message);
-}
-try {
-  // Works as s(data.count); Useless as data.count()
-  // Error for consistency check again
-  createReaction(DoSomeWork);
-} catch (err) {
-  console.log('Thrown', err.message);
-}
+    o('sub read pass read', function() {
+      let R = createReaction(() => {
+        s(data.count);
+        data.label();
+      });
+      o(R.runs).equals(1)`Reaction runs on initialization`;
 
-function DoSomeWorkFixed() {
-  return s(data.count) * 10 + data.countMax();
-}
+      // Test sub reads
+      o(R.reactionSubbedReads.size).equals(1);
+      o(R.reactionSubbedReads.has(data.count)).equals(true);
+      o(data.count.reactions.has(R)).equals(true);
 
-createReaction(() => {
-  const el = String(700 * sFrom(DoSomeWorkFixed) + '%');
-  console.log('Reaction for DoSomeWorkFixed:', el);
-});
+      // Test pass reads
+      o(R.reactionPassedReads.size).equals(1);
+      o(R.reactionPassedReads.has(data.label)).equals(true);
+      o(data.label.reactions.has(R)).equals(false);
+    });
 
-data.count(data.count() + 1);
+    function checkRollback(R) {
+      o(R.reactionSubbedReads.has(data.count)).equals(false)`Reaction rollback doesn't hold sub-reads`;
+      o(R.reactionPassedReads.has(data.count)).equals(false)`Reaction rollback doesn't hold pass-reads`;
+      o(data.count.reactions.has(R)).equals(false)`Previously subbed boxes don't hold rollbacked reactions`;
+    }
+    o('read after subscribe throws', function() {
+      let R;
+      o(() => {
+        R = createReaction(() => {
+          s(data.count) + data.count();
+        });
+      }).throws(`Reaction ${R.id} can't pass-read ${data.count.id} after subscribe-reading it; pick one`);
+      checkRollback(R);
+    });
+    o('subscribe after read throws', function() {
+      let R;
+      o(() => {
+        R = createReaction(() => {
+          data.count() + s(data.count);
+        });
+      }).throws(`Reaction ${R.id} can't sub-read ${data.count.id} after pass-reading it; pick one`);
+      checkRollback(R);
+    });
+  });
 
-createReaction(() => {
-  console.log('This one is interested in data.list, so it will sub to that');
-  console.log(data.list().reduce((acc, now) => acc + String(now), ''));
-  console.log('Then I\'ll try to do some work');
+  o.spec('reaction call order', function() {
+    let data = createNamedBoxes({
+      wsMessages: [],
+      label: '!!!',
+    });
+    let R1, R2;
+    let str = '';
+    // Some user-land utility function...
+    function addLog(msg) {
+      data.wsMessages(data.wsMessages().concat(msg));
+    }
 
-  // Safe: Any inner subscriptions will throw an error to make sure the dev is
-  // informed when deciding how to proceed
-  try {
-    const countA = DoSomeWorkFixed();
-  } catch (err) {
-    console.log('CountA Thrown', err.message);
-  }
+    o.beforeEach(function() {
+      R1.runs = 0;
+      R2.runs = 0;
+    });
 
-  // Opt-out version: Doesn't throw for inner subscriptions; ignores s()/sFrom()
-  // calls deeper in the tree
-  try {
-    const countB = sIgnore(DoSomeWorkFixed);
-  } catch (err) {
-    console.log('CountB Thrown', err.message);
-  }
+    o('create R1 with wsMessage sub', function() {
+      R1 = createReaction(function writeLog() {
+        str = `${s(data.wsMessages).length} items${
+          s(data.wsMessages).length > 0
+            ? '\n- ' + s(data.wsMessages).join('\n- ')
+            : ''}`;
+      });
 
-  // Opt-in version: Doesn't throw for inner subscriptions; s()/sFrom() calls
-  // are subscribed to unless an sIgnore() is reached
-  try {
-    const countC = sFrom(DoSomeWorkFixed);
-  } catch (err) {
-    console.log('CountC Thrown', err.message);
-  }
+      o(R1.runs).equals(1);
+      o(str).equals('0 items');
+      o(data.wsMessages.reactions.length).equals(1);
+
+      addLog('🐈🐈🐈');
+      o(R1.runs).equals(2);
+      o(str).equals('1 items\n- 🐈🐈🐈');
+      o(data.wsMessages.reactions.length).equals(1);
+    });
+
+    o('create R2 reading wsMessage from addLog()', function() {
+      R2 = createReaction(() => {
+        addLog('...');
+        s(data.label);
+      });
+
+      o(R1.runs).equals(1);
+      o(R2.runs).equals(1);
+
+      // This is literally the whole reason I started this. In Sinuous it would
+      // secretly subscribe and ruin your day...
+      o(R2.reactionSubbedReads.has(data.wsMessages)).equals(false);
+      o(str).equals('2 items\n- 🐈🐈🐈\n- ...');
+    });
+
+    o('addLog() calls R1 not R2', function() {
+      addLog('R1 not R2');
+      o(R1.runs).equals(1);
+      o(R2.runs).equals(0);
+    });
+
+    o('data.label() calls R1 and R2', function() {
+      data.label('R1 and R2');
+      o(R1.runs).equals(1);
+      o(R2.runs).equals(1);
+    });
+  });
+
+
+  o.spec('s()', function() {
+    let data = createNamedBoxes({
+      label: '???',
+      count: 0,
+    });
+
+    function partialReaction() {
+      const value = s(data.count);
+      return value * 100;
+    }
+
+    o('needs an active reaction', function() {
+      o(() => {
+        partialReaction();
+      }).throws('s() Can\'t subscribe; no active reaction');
+    });
+    // ✨ This is it ✨
+    o('not allowed to hide s() in a function', function() {
+      // Visually looks like it doesn't do any subscriptions - so it shouldn't
+      o(() => {
+        createReaction(() => {
+          console.log(data.label() + partialReaction());
+        });
+      }).throws(`s() Can't subscribe; caller "${partialReaction.name}" isn't the active/allowed reaction`);
+    });
+  });
+
+  o.spec('sFrom()', function() {
+    let data = createNamedBoxes({
+      label: '???',
+      count: 0,
+    });
+
+    function partialReaction() {
+      const value = s(data.count);
+      return value * 100;
+    }
+
+    o('needs an active reaction', function() {
+      o(() => {
+        sFrom(partialReaction);
+      }).throws('sFrom() Can\'t subscribe; no active reaction');
+    });
+    o('passes subscriptions', function() {
+      // Visually looks like it does subscriptions
+      let R = createReaction(() => {
+        s(data.label());
+        sFrom(partialReaction);
+      });
+      o(R.reactionSubbedReads.has(data.label)).equals(true);
+      o(R.reactionSubbedReads.has(data.count)).equals(true);
+    });
+    o('enforces read consistency in sFrom', function() {
+      let R;
+      o(() => {
+        R = createReaction(() => {
+          sFrom(() => s(data.count()) + data.count());
+        });
+      }).throws('');
+    });
+    o('read consistency between sFrom and top-level is ignored', function() {
+      let R;
+      o(() => {
+        R = createReaction(() => {
+          data.count();
+          sFrom(() => s(data.count()));
+        });
+      }).notThrows();
+    });
+  });
+
+  o.spec('sIgnore()', function() {
+    let data = createNamedBoxes({
+      label: '???',
+      count: 0,
+    });
+
+    function partialReaction() {
+      const value = s(data.count);
+      return value * 100;
+    }
+
+    o('doesn\'t need an active reaction', function() {
+      o(() =>
+        sIgnore(partialReaction)
+      ).notThrows();
+    });
+    o('doesn\'t pass subscriptions', function() {
+      // Visually looks like it does subscriptions
+      let R = createReaction(() => {
+        s(data.label());
+        sIgnore(partialReaction);
+      });
+      o(R.reactionSubbedReads.has(data.label)).equals(true);
+      o(R.reactionSubbedReads.has(data.count)).equals(false);
+    });
+    o('enforces read consistency in sIgnore', function() {
+      let R;
+      o(() =>
+        R = createReaction(() => {
+          sIgnore(() => s(data.count()) + data.count());
+        })
+      ).throws('');
+    });
+    o('read consistency between sIgnore and top-level is ignored', function() {
+      let R;
+      o(() =>
+        R = createReaction(() => {
+          data.count();
+          sIgnore(() => s(data.count()));
+        })
+      ).notThrows();
+    });
+  });
 });
