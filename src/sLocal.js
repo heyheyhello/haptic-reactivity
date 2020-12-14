@@ -10,7 +10,7 @@ let sRead = false;
 
 const rx = (fn) => {
   const _rx = () => _rxRun(_rx);
-  _rx.id = `R${reactionId++}:${fn.name || '<Anon>'}`;
+  _rx.id = `R${reactionId++}-${fn.name || '?'}`;
   _rx.fn = fn;
   _rx.sr = new Set(); // Set<Box>
   _rx.pr = new Set(); // Set<Box>
@@ -51,7 +51,6 @@ const _rxRun = (rx) => {
   try {
     rx.fn(s);
     rx.runs++;
-    if (rx.runs > 10) throw new Error();
     console.log(`Run ${rx.runs}: ${rx.sr.size}/${rx.sr.size + rx.pr.size} reads subscribed`);
   } catch (err) {
     error = err;
@@ -96,7 +95,7 @@ const _box = (k, v) => {
     }
     return saved;
   };
-  box.id = `B${boxId++}` + (k ? `:${k}` : '');
+  box.id = `B${boxId++}-${k || '?'}`;
   box.rx = new Set();
   return box;
 };
