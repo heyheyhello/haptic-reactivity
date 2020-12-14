@@ -15,14 +15,11 @@ const rx = (fn) => {
   _rx.sr = new Set(); // Set<Box>
   _rx.pr = new Set(); // Set<Box>
   _rx.runs = 0;
-  _rx.created = new Set(); // Set<ReactionMeta>
+  _rx.created = []; // Rx[]. Not a set because it's always small
   _rx.unsubscribe = () => _rxUnsubscribe(_rx);
-  console.log(`Create ${_rx.id}`);
+  console.log(`Created ${_rx.id}`, rxActive ? `as child of ${rxActive.id}` : '');
   live.add(_rx);
-  if (rxActive) {
-    console.log(`${_rx.id} was created under ${rxActive.id}`);
-    rxActive.created.add(_rx);
-  }
+  if (rxActive) rxActive.created.add(_rx);
   _rx();
   return _rx;
 };
@@ -61,11 +58,11 @@ const _rxRun = (rx) => {
 };
 
 const _rxUnsubscribe = (rx) => {
-  if (rx.created.size) {
-    rx.created.forEach(_rxUnsubscribe);
-    rx.created = new Set();
-  }
+  if (!rx.runs) return;
+  rx.created.forEach(_rxUnsubscribe);
+  rx.created = [];
   rx.sr.forEach(box => box.rx.delete(rx));
+  // TODO: Perf vs Set.clear()
   rx.sr = new Set();
   rx.pr = new Set();
 };
