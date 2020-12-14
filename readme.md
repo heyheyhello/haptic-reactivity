@@ -14,6 +14,21 @@ which were created during their runs.
 Explicit subscriptions avoid accidental reaction calls that were an issue in
 Haptic's previous "Signal" reactivity model (from Sinuous/Solid/S.js)
 
-Unlike those libraries, there is no automatic memory management yet. There might
-not be. It seems wasteful to destroy all reaction linkings every run, but then
-again, it's also a lot of work to do consistency checks every run...
+Like those libraries, it uses "automatic memory management" which seems wasteful
+since it destroys all reaction linkings every run, but it is simple at least.
+
+It's small:
+
+```
+ work [!] is 📦 v0.0.0 via ⬢ v14.2.0
+❯ esbuild src/sLocal.js --minify --format=esm | gzip -9 | wc -c                                           (base)
+475
+
+ work [!] is 📦 v0.0.0 via ⬢ v14.2.0
+❯ esbuild src/sLocal.js --minify --format=esm | wc -c                                                     (base)
+855
+```
+
+Hopefully brings down Haptic's size, although I still have features to implement
+and Haptic/s is 560min+gz and 1238min...
+
