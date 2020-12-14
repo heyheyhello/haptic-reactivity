@@ -8,7 +8,7 @@ let rxActive = undefined;
 // To skip the subbed consistency check during an s(box) read
 let sRead = false;
 
-function rx(fn) {
+const rx = (fn) => {
   const _rx = () => _rxRun(_rx);
   _rx.id = `R${reactionId++}:${fn.name || '<Anon>'}`;
   _rx.fn = fn;
@@ -25,10 +25,10 @@ function rx(fn) {
   }
   _rx();
   return _rx;
-}
+};
 
 // This takes a meta object because honestly you shouldn't use it directly?
-function _rxRun(rx) {
+const _rxRun = (rx) => {
   // Define the subscription function
   const s = box => {
     if (rx.pr.has(box)) throw new Error(`Mixed reads ${box.id}`);
@@ -59,9 +59,9 @@ function _rxRun(rx) {
   rxActive = prevActive;
   console.groupEnd(`Run ${rx.id}`);
   if (error) throw error;
-}
+};
 
-function _rxUnsubscribe(rx) {
+const _rxUnsubscribe = (rx) => {
   if (rx.created.size) {
     rx.created.forEach(_rxUnsubscribe);
     rx.created = new Set();
@@ -69,9 +69,9 @@ function _rxUnsubscribe(rx) {
   rx.sr.forEach(box => box.rx.delete(rx));
   rx.sr = new Set();
   rx.pr = new Set();
-}
+};
 
-function _box(k, v) {
+const _box = (k, v) => {
   // Store in a closure and not a property of the box
   let saved = v;
   const box = (...args) => {
@@ -99,13 +99,11 @@ function _box(k, v) {
   box.id = `B${boxId++}` + (k ? `:${k}` : '');
   box.rx = new Set();
   return box;
-}
+};
 
-function boxes(obj) {
-  for (const k of Object.keys(obj)) {
-    obj[k] = _box(k, obj[k]);
-  }
+const boxes = obj => {
+  Object.keys(obj).forEach(k => { obj[k] = _box(k, obj[k]); });
   return obj;
-}
+};
 
 module.exports = { live, rx, boxes };
