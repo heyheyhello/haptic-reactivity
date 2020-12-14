@@ -33,13 +33,9 @@ function createReaction(fn) {
     console.log('Error during creation/run. Removing reaction...');
     removeReaction(fn);
     error = err;
-  } finally {
-    console.groupEnd(label);
-    if (error) {
-      // eslint-disable-next-line no-unsafe-finally
-      throw error;
-    }
   }
+  console.groupEnd(label);
+  if (error) throw error;
   return fn;
 }
 
@@ -76,14 +72,10 @@ function runReaction(fn) {
     }
   } catch (err) {
     error = err;
-  } finally {
-    activeReaction = prevAR; // Important
-    console.groupEnd(label);
-    if (error) {
-      // eslint-disable-next-line no-unsafe-finally
-      throw error;
-    }
   }
+  activeReaction = prevAR; // Important
+  console.groupEnd(label);
+  if (error) throw error;
 }
 
 function removeReaction(fn) {
@@ -151,20 +143,14 @@ function captureSubscriptions(fn) {
     console.log(`Captured ${capture.size} subscriptions`);
   } catch (err) {
     error = err;
-  } finally {
-    activeReaction = realAR;
-    delete fn.id;
-    delete fn.reactionSubbedReads;
-    delete fn.reactionPassedReads;
-    if (error) {
-      // eslint-disable-next-line no-unsafe-finally
-      throw error;
-    }
-    // TODO: Not happy about object passing as an intermediate...
-    // Also wow neat! ESLint telling me good stuff...
-    // eslint-disable-next-line no-unsafe-finally
-    return { value, capture };
   }
+  activeReaction = realAR;
+  delete fn.id;
+  delete fn.reactionSubbedReads;
+  delete fn.reactionPassedReads;
+  if (error) throw error;
+  // TODO: Not happy about object passing as an intermediate...
+  return { value, capture };
 }
 
 function sFrom(fn) {
