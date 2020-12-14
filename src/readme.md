@@ -25,3 +25,12 @@ It's explicit but there's no global variable mess. If you want to write a
 partial reaction, like everyone in Haptic will, you accept an s parameter...
 There's no difference between top-level calls and sub-calls, so there's no need
 to use Function.caller either.
+
+Extras:
+
+It's easy to enable a shorthand in JSX as `{data.count}` like Sinuous does. Just
+have a `let sActive = undefined;` global variable and then in `box` check if
+someone is trying to _write_ `sActive` into the box. Then subscribe instead,
+assuming they don't really want to write. This short-hands `{s => s(box)}` as
+simply `{box}` in JSX. I decided to not implement it since you're only saving a
+few characters and it's magic - magic is bad.
