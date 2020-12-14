@@ -24,6 +24,7 @@ function createReaction(fn) {
     console.log(`Reaction lifetime scoped to its parent, ${activeReaction.id}`);
     activeReaction.reactionChildren.add(fn);
   }
+  let error;
   try {
     runReaction(fn);
   } catch (err) {
@@ -31,8 +32,13 @@ function createReaction(fn) {
     console.log('Thrown', err.message);
     console.log('Error during creation/run. Removing reaction...');
     removeReaction(fn);
+    error = err;
   } finally {
     console.groupEnd(label);
+    if (error) {
+      // eslint-disable-next-line no-unsafe-finally
+      throw error;
+    }
   }
   return fn;
 }
@@ -50,6 +56,7 @@ function runReaction(fn) {
   const prevSubs = new Set(fn.reactionSubbedReads);
   fn.reactionSubbedReads.clear();
   fn.reactionPassedReads.clear();
+  let error;
   try {
     fn();
     fn.runs++;
@@ -67,9 +74,15 @@ function runReaction(fn) {
     if (fn.reactionSubbedReads.size === 0) {
       removeReaction(fn);
     }
+  } catch (err) {
+    error = err;
   } finally {
     activeReaction = prevAR; // Important
     console.groupEnd(label);
+    if (error) {
+      // eslint-disable-next-line no-unsafe-finally
+      throw error;
+    }
   }
 }
 
@@ -129,17 +142,24 @@ function captureSubscriptions(fn) {
 
   let capture;
   let value;
+  let error;
   try {
     value = fn();
     // If we made it this far without throwing an error then all consistency
     // checks passed ✅
     capture = fn.reactionSubbedReads;
     console.log(`Captured ${capture.size} subscriptions`);
+  } catch (err) {
+    error = err;
   } finally {
     activeReaction = realAR;
     delete fn.id;
     delete fn.reactionSubbedReads;
     delete fn.reactionPassedReads;
+    if (error) {
+      // eslint-disable-next-line no-unsafe-finally
+      throw error;
+    }
     // TODO: Not happy about object passing as an intermediate...
     // Also wow neat! ESLint telling me good stuff...
     // eslint-disable-next-line no-unsafe-finally

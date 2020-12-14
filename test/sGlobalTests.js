@@ -96,26 +96,36 @@ o.spec('haptic-reactivity', function() {
     });
 
     function checkRollback(R) {
-      o(R.reactionSubbedReads.has(data.count)).equals(false)`Reaction rollback doesn't hold sub-reads`;
-      o(R.reactionPassedReads.has(data.count)).equals(false)`Reaction rollback doesn't hold pass-reads`;
+      // These are removed during the rollback
+      // o(R.reactionSubbedReads.has(data.count)).equals(false)`Reaction rollback doesn't hold sub-reads`;
+      // o(R.reactionPassedReads.has(data.count)).equals(false)`Reaction rollback doesn't hold pass-reads`;
       o(data.count.reactions.has(R)).equals(false)`Previously subbed boxes don't hold rollbacked reactions`;
     }
     o('read after subscribe throws', function() {
-      let R;
-      o(() => {
-        R = createReaction(() => {
-          s(data.count) + data.count();
-        });
-      }).throws(`Reaction ${R.id} can't pass-read ${data.count.id} after subscribe-reading it; pick one`);
+      // Can't use `R = createReaction(() => {...})` since it throws so doesn't
+      // return a value to assign to R
+      let R = () => {
+        s(data.count) + data.count();
+      };
+      try {
+        createReaction(R);
+      } catch (err) {
+        o(err.message).equals(`Reaction ${R.id} can't pass-read ${data.count.id} after subscribe-reading it; pick one`);
+      }
       checkRollback(R);
     });
+
     o('subscribe after read throws', function() {
-      let R;
-      o(() => {
-        R = createReaction(() => {
-          data.count() + s(data.count);
-        });
-      }).throws(`Reaction ${R.id} can't sub-read ${data.count.id} after pass-reading it; pick one`);
+      // Can't use `R = createReaction(() => {...})` since it throws so doesn't
+      // return a value to assign to R
+      let R = () => {
+        data.count() + s(data.count);
+      };
+      try {
+        createReaction(R);
+      } catch (err) {
+        o(err.message).equals(`Reaction ${R.id} can't subscribe-read to ${data.count.id} after pass-reading it; pick one`);
+      }
       checkRollback(R);
     });
   });
@@ -133,8 +143,8 @@ o.spec('haptic-reactivity', function() {
     }
 
     o.beforeEach(function() {
-      R1.runs = 0;
-      R2.runs = 0;
+      if (R1) R1.runs = 0;
+      if (R2) R2.runs = 0;
     });
 
     o('create R1 with wsMessage sub', function() {
@@ -147,12 +157,12 @@ o.spec('haptic-reactivity', function() {
 
       o(R1.runs).equals(1);
       o(str).equals('0 items');
-      o(data.wsMessages.reactions.length).equals(1);
+      o(data.wsMessages.reactions.size).equals(1);
 
       addLog('🐈🐈🐈');
       o(R1.runs).equals(2);
       o(str).equals('1 items\n- 🐈🐈🐈');
-      o(data.wsMessages.reactions.length).equals(1);
+      o(data.wsMessages.reactions.size).equals(1);
     });
 
     o('create R2 reading wsMessage from addLog()', function() {
@@ -196,18 +206,24 @@ o.spec('haptic-reactivity', function() {
     }
 
     o('needs an active reaction', function() {
-      o(() => {
+      try {
         partialReaction();
-      }).throws('s() Can\'t subscribe; no active reaction');
+        throw 'Should have thrown...';
+      } catch (err) {
+        o(err.message).equals('s() Can\'t subscribe; no active reaction');
+      }
     });
     // ✨ This is it ✨
     o('not allowed to hide s() in a function', function() {
       // Visually looks like it doesn't do any subscriptions - so it shouldn't
-      o(() => {
+      try {
         createReaction(() => {
           console.log(data.label() + partialReaction());
         });
-      }).throws(`s() Can't subscribe; caller "${partialReaction.name}" isn't the active/allowed reaction`);
+        throw 'Should have thrown...';
+      } catch (err) {
+        o(err.message).equals(`s() Can't subscribe; caller "${partialReaction.name}" isn't the active/allowed reaction`);
+      }
     });
   });
 
@@ -223,14 +239,17 @@ o.spec('haptic-reactivity', function() {
     }
 
     o('needs an active reaction', function() {
-      o(() => {
+      try {
         sFrom(partialReaction);
-      }).throws('sFrom() Can\'t subscribe; no active reaction');
+        throw 'Should have thrown...';
+      } catch (err) {
+        o(err.message).equals('sFrom() Can\'t subscribe; no active reaction');
+      }
     });
     o('passes subscriptions', function() {
       // Visually looks like it does subscriptions
       let R = createReaction(() => {
-        s(data.label());
+        s(data.label);
         sFrom(partialReaction);
       });
       o(R.reactionSubbedReads.has(data.label)).equals(true);
@@ -238,20 +257,25 @@ o.spec('haptic-reactivity', function() {
     });
     o('enforces read consistency in sFrom', function() {
       let R;
-      o(() => {
+      try {
         R = createReaction(() => {
-          sFrom(() => s(data.count()) + data.count());
+          sFrom(() => s(data.count) + data.count());
         });
-      }).throws('');
+        throw 'Should have thrown...';
+      } catch (err) {
+        o(err.message).equals(`Reaction CAPTURE can't pass-read ${data.count.id} after subscribe-reading it; pick one`);
+      }
     });
     o('read consistency between sFrom and top-level is ignored', function() {
       let R;
-      o(() => {
+      try {
         R = createReaction(() => {
           data.count();
-          sFrom(() => s(data.count()));
+          sFrom(() => s(data.count));
         });
-      }).notThrows();
+      } catch (err) {
+        throw 'Shouldn\'t have thrown';
+      }
     });
   });
 
@@ -267,14 +291,16 @@ o.spec('haptic-reactivity', function() {
     }
 
     o('doesn\'t need an active reaction', function() {
-      o(() =>
-        sIgnore(partialReaction)
-      ).notThrows();
+      try {
+        sIgnore(partialReaction);
+      } catch (err) {
+        throw 'Shouldn\'t have thrown';
+      }
     });
     o('doesn\'t pass subscriptions', function() {
       // Visually looks like it does subscriptions
       let R = createReaction(() => {
-        s(data.label());
+        s(data.label);
         sIgnore(partialReaction);
       });
       o(R.reactionSubbedReads.has(data.label)).equals(true);
@@ -282,20 +308,25 @@ o.spec('haptic-reactivity', function() {
     });
     o('enforces read consistency in sIgnore', function() {
       let R;
-      o(() =>
+      try {
         R = createReaction(() => {
-          sIgnore(() => s(data.count()) + data.count());
-        })
-      ).throws('');
+          sIgnore(() => s(data.count) + data.count());
+        });
+        throw 'Should have thrown...';
+      } catch (err) {
+        o(err.message).equals(`Reaction CAPTURE can't pass-read ${data.count.id} after subscribe-reading it; pick one`);
+      }
     });
     o('read consistency between sIgnore and top-level is ignored', function() {
       let R;
-      o(() =>
+      try {
         R = createReaction(() => {
           data.count();
-          sIgnore(() => s(data.count()));
-        })
-      ).notThrows();
+          sIgnore(() => s(data.count));
+        });
+      } catch (err) {
+        throw 'Shouldn\'t have thrown';
+      }
     });
   });
 });
