@@ -7,7 +7,11 @@ let live = new Set();
 let rxActive = undefined;
 // To skip the subbed consistency check during an s(box) read
 let sRead = false;
+// Transactions
+let transactionQueue = [];
 
+// Unique value to compare with `===` since Symbol() doesn't gzip well
+const EMPTY_ARR = [];
 
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
@@ -72,9 +76,17 @@ const createBox = (k, v) => {
   let saved = v;
   const box = (...args) => {
     if (args.length) {
-      const [valueNext] = args;
-      console.log(`Write ${box.id}:`, saved, '➡', valueNext, `Notifying ${box.rx.size} reactions`);
-      saved = valueNext;
+      const [nextValue] = args;
+      console.log(`Write ${box.id}:`, saved, '➡', nextValue, `Notifying ${box.rx.size} reactions`);
+      if (transactionQueue) {
+        if (box.pending === EMPTY_ARR) {
+          transactionQueue.push(box);
+        }
+        box.pending = nextValue;
+        // Don't save
+        return nextValue;
+      }
+      saved = nextValue;
       // Duplicate the set else it's an infinite loop...
       new Set(box.rx).forEach(_rxRun);
       // Don't return a value; keeps it simple
@@ -94,12 +106,29 @@ const createBox = (k, v) => {
   };
   box.id = `B${boxId++}-${k || '?'}`;
   box.rx = new Set();
+  box.pending = EMPTY_ARR;
   return box;
 };
 
 const createBoxes = obj => {
   Object.keys(obj).forEach(k => { obj[k] = createBox(k, obj[k]); });
   return obj;
+};
+
+const transaction = (fn) => {
+  const prevTQ = transactionQueue;
+  transactionQueue = [];
+  const value = fn();
+  const boxes = transactionQueue;
+  transactionQueue = prevTQ;
+  boxes.forEach(box => {
+    if (box.pending !== EMPTY_ARR) {
+      const { pending } = box;
+      box.pending = EMPTY_ARR;
+      box(pending);
+    }
+  });
+  return value;
 };
 
 // export { live, createRx as rx, createBoxes as boxes };
