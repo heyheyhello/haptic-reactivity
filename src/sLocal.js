@@ -8,27 +8,27 @@ let rxActive = undefined;
 // To skip the subbed consistency check during an s(box) read
 let sRead = false;
 
-const rx = (fn) => {
-  const _rx = () => _rxRun(_rx);
-  _rx.id = `R${reactionId++}-${fn.name || '?'}`;
-  _rx.fn = fn;
-  _rx.sr = new Set(); // Set<Box>
-  _rx.pr = new Set(); // Set<Box>
-  _rx.runs = 0;
-  _rx.created = []; // Rx[]. Not a set because it's always small
-  _rx.unsubscribe = () => _rxUnsubscribe(_rx);
-  console.log(`Created ${_rx.id}`, rxActive ? `as child of ${rxActive.id}` : '');
-  live.add(_rx);
-  if (rxActive) rxActive.created.add(_rx);
-  _rx();
-  return _rx;
+
+const createRx = (fn) => {
+  const rx = () => _rxRun(rx);
+  rx.id = `R${reactionId++}-${fn.name || '?'}`;
+  rx.fn = fn;
+  rx.sr = new Set(); // Set<Box>
+  rx.pr = new Set(); // Set<Box>
+  rx.runs = 0;
+  rx.children = []; // Rx[]. Not a set because it's always small
+  rx.unsubscribe = () => _rxUnsubscribe(rx);
+  console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
+  if (rxActive) rxActive.children.add(rx);
+  rx();
+  return rx;
 };
 
 // This takes a meta object because honestly you shouldn't use it directly?
 const _rxRun = (rx) => {
   // Define the subscription function
   const s = box => {
-    if (rx.pr.has(box)) throw new Error(`Mixed reads ${box.id}`);
+    if (rx.pr.has(box)) throw new Error(`Mixed reads pr/sr ${box.id}`);
     // Add to box.rx first so it throws if s() wasn't passed a box...
     box.rx.add(rx);
     rx.sr.add(box);
@@ -67,8 +67,8 @@ const _rxUnsubscribe = (rx) => {
   rx.pr = new Set();
 };
 
-const _box = (k, v) => {
-  // Store in a closure and not a property of the box
+const createBox = (k, v) => {
+  // Hide the stored value in a closure and not as a property of the box
   let saved = v;
   const box = (...args) => {
     if (args.length) {
@@ -87,7 +87,7 @@ const _box = (k, v) => {
       );
     }
     if (rxActive && !sRead) {
-      if (rxActive.sr.has(box)) throw new Error(`Mixed reads ${box.id}`);
+      if (rxActive.sr.has(box)) throw new Error(`Mixed reads sr/pr ${box.id}`);
       rxActive.pr.add(box);
     }
     return saved;
@@ -97,9 +97,10 @@ const _box = (k, v) => {
   return box;
 };
 
-const boxes = obj => {
-  Object.keys(obj).forEach(k => { obj[k] = _box(k, obj[k]); });
+const createBoxes = obj => {
+  Object.keys(obj).forEach(k => { obj[k] = createBox(k, obj[k]); });
   return obj;
 };
 
-module.exports = { live, rx, boxes };
+// export { live, createRx as rx, createBoxes as boxes };
+module.exports = { rx: createRx, boxes: createBoxes, transaction };
