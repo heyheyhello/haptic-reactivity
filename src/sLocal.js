@@ -1,8 +1,8 @@
 let boxId = 0;
 let reactionId = 0;
 
-// Registry of reactions
-let live = new Set();
+// Registry of reaction parents (and therefore all known reactions)
+let rxParentLookup = new WeakMap();
 // Current reaction
 let rxActive = undefined;
 // To skip the subbed consistency check during an s(box) read
@@ -13,6 +13,14 @@ let transactionQueue = [];
 // Unique value to compare with `===` since Symbol() doesn't gzip well
 const EMPTY_ARR = [];
 
+// Reactions can be in one of these states
+const state = {
+  ON: 1,
+  PAUSED: 2,
+  PAUSED_STALE: 3,
+  OFF: 4,
+};
+
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
   rx.id = `R${reactionId++}-${fn.name || '?'}`;
@@ -21,6 +29,9 @@ const createRx = (fn) => {
   rx.pr = new Set(); // Set<Box>
   rx.runs = 0;
   rx.children = []; // Rx[]. Not a set because it's always small
+  rx.state = state.ON;
+  rx.pause = () => _rxPause(rx);
+  rxParentLookup.set(rx, rxActive); // Maybe undefined; that's fine
   rx.unsubscribe = () => _rxUnsubscribe(rx);
   console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
   if (rxActive) rxActive.children.add(rx);
@@ -30,6 +41,12 @@ const createRx = (fn) => {
 
 // This takes a meta object because honestly you shouldn't use it directly?
 const _rxRun = (rx) => {
+  if (rx.state === state.PAUSED) {
+    // The reaction never reached PAUSED_STALE so nothing's changed. Maybe our
+    // children need to update though:
+    rx.state = state.ON;
+    rx.children.forEach(_rxRun);
+  }
   // Define the subscription function
   const s = box => {
     if (rx.pr.has(box)) throw new Error(`Mixed reads pr/sr ${box.id}`);
@@ -42,8 +59,6 @@ const _rxRun = (rx) => {
     sRead = false;
     return value;
   };
-
-  console.group(`Run ${rx.id}`);
   const prevActive = rxActive;
   rxActive = rx;
   // Drop everything in the tree like Sinuous'/S.js' automatic memory management
@@ -52,23 +67,31 @@ const _rxRun = (rx) => {
   try {
     rx.fn(s);
     rx.runs++;
+    rx.state = state.ON;
     console.log(`Run ${rx.runs}: ${rx.sr.size}/${rx.sr.size + rx.pr.size} reads subscribed`);
   } catch (err) {
     error = err;
   }
   rxActive = prevActive;
-  console.groupEnd(`Run ${rx.id}`);
   if (error) throw error;
 };
 
 const _rxUnsubscribe = (rx) => {
-  if (!rx.runs) return;
-  rx.created.forEach(_rxUnsubscribe);
-  rx.created = [];
+  if (!rx.runs) {
+    // There aren't any connections if the reaction has never run
+    return;
+  }
+  rx.children.forEach(_rxUnsubscribe);
+  rx.children = [];
   rx.sr.forEach(box => box.rx.delete(rx));
-  // TODO: Perf vs Set.clear()
-  rx.sr = new Set();
-  rx.pr = new Set();
+  rx.sr.clear();
+  rx.pr.clear();
+  rx.state = state.OFF;
+};
+
+const _rxPause = (rx) => {
+  rx.children.forEach(_rxPause);
+  rx.state = state.PAUSED;
 };
 
 const createBox = (k, v) => {
@@ -88,7 +111,26 @@ const createBox = (k, v) => {
       }
       saved = nextValue;
       // Duplicate the set else it's an infinite loop...
-      new Set(box.rx).forEach(_rxRun);
+      // Needs to be ordered by parent->child
+      const toRun = new Set(box.rx);
+      const runMaybe = (rx) => {
+        if (rx.state === state.PAUSED) {
+          rx.state = state.PAUSED_STALE;
+        } else {
+          _rxRun(rx);
+        }
+      };
+      toRun.forEach(rx => {
+        const rxParent = rxParentLookup.get(rx);
+        if (rxParent && toRun.has(rxParent)) {
+          runMaybe(rxParent);
+          toRun.delete(rxParent);
+          // Parent has unsubscribed (rx.state === state.OFF)
+          // This rx has been superceded; unfortunately
+          return;
+        }
+        runMaybe(rx);
+      });
       // Don't return a value; keeps it simple
       return;
     }
