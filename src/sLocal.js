@@ -113,23 +113,18 @@ const createBox = (k, v) => {
       // Duplicate the set else it's an infinite loop...
       // Needs to be ordered by parent->child
       const toRun = new Set(box.rx);
-      const runMaybe = (rx) => {
+      toRun.forEach(rx => {
+        const rxParent = rxParentLookup.get(rx);
+        if (rxParent && toRun.has(rxParent)) {
+          // Parent has unsubscribed (rx.state === state.OFF)
+          // This rx has been superceded; unfortunately
+          rx = rxParent;
+        }
         if (rx.state === state.PAUSED) {
           rx.state = state.PAUSED_STALE;
         } else {
           _rxRun(rx);
         }
-      };
-      toRun.forEach(rx => {
-        const rxParent = rxParentLookup.get(rx);
-        if (rxParent && toRun.has(rxParent)) {
-          runMaybe(rxParent);
-          toRun.delete(rxParent);
-          // Parent has unsubscribed (rx.state === state.OFF)
-          // This rx has been superceded; unfortunately
-          return;
-        }
-        runMaybe(rx);
       });
       // Don't return a value; keeps it simple
       return;
