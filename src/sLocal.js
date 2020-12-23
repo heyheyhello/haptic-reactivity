@@ -67,7 +67,9 @@ const _rxRun = (rx) => {
   try {
     rx.fn(s);
     rx.runs++;
-    rx.state = state.ON;
+    if (rx.sr.size) {
+      rx.state = state.ON;
+    }
     console.log(`Run ${rx.runs}: ${rx.sr.size}/${rx.sr.size + rx.pr.size} reads subscribed`);
   } catch (err) {
     error = err;
