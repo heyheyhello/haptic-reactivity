@@ -31,10 +31,15 @@ const createRx = (fn) => {
   rx.children = []; // Rx[]. Not a set because it's always small
   rx.state = state.ON;
   rx.pause = () => _rxPause(rx);
-  rxParentLookup.set(rx, rxActive); // Maybe undefined; that's fine
   rx.unsubscribe = () => _rxUnsubscribe(rx);
+  // This replaces root(() => {}) from Sinuous/S.js?
+  rx.adopt = (rxChild) => {
+    rx.children.push(rxChild);
+    rxParentLookup.set(rxChild, rx);
+  };
   console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
-  if (rxActive) rxActive.children.add(rx);
+  rxParentLookup.set(rx, rxActive); // Maybe undefined; that's fine
+  if (rxActive) rxActive.children.push(rx);
   rx();
   return rx;
 };
