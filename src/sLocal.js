@@ -14,11 +14,11 @@ let error;
 const rxTree = new WeakMap();
 
 // Unique value to compare with `===` since Symbol() doesn't gzip well
-const BOX_NEXT_EMPTY     = new Symbol();
-const STATE_ON           = new Symbol();
-const STATE_PAUSED       = new Symbol();
-const STATE_PAUSED_STALE = new Symbol();
-const STATE_OFF          = new Symbol();
+const BOX_NEXT_EMPTY     = Symbol();
+const STATE_ON           = Symbol();
+const STATE_PAUSED       = Symbol();
+const STATE_PAUSED_STALE = Symbol();
+const STATE_OFF          = Symbol();
 
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
@@ -176,3 +176,4 @@ const adopt = (rxParent, fn) => {
 };
 
 export { createRx as rx, createBoxes as boxes, transaction, adopt, rxTree };
+// module.exports = { rx: createRx, boxes: createBoxes, transaction, adopt, rxTree };
