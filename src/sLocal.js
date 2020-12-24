@@ -8,7 +8,7 @@ let rxActive = undefined;
 // To skip the subbed consistency check during an s(box) read
 let sRead = false;
 // Transactions
-let transactionQueue = [];
+let transactioned = [];
 
 // Unique value to compare with `===` since Symbol() doesn't gzip well
 const EMPTY_ARR = [];
@@ -32,12 +32,7 @@ const createRx = (fn) => {
   rx.state = state.ON;
   rx.pause = () => _rxPause(rx);
   rx.unsubscribe = () => _rxUnsubscribe(rx);
-  // This replaces root(() => {}) from Sinuous/S.js?
-  rx.adopt = (rxChild) => {
-    rx.children.push(rxChild);
-    rxParentLookup.set(rxChild, rx);
-  };
-  console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
+  // console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
   rxParentLookup.set(rx, rxActive); // Maybe undefined; that's fine
   if (rxActive) rxActive.children.push(rx);
   rx();
@@ -51,6 +46,7 @@ const _rxRun = (rx) => {
     // children need to update though:
     rx.state = state.ON;
     rx.children.forEach(_rxRun);
+    return;
   }
   // Define the subscription function
   const s = box => {
@@ -58,15 +54,15 @@ const _rxRun = (rx) => {
     // Add to box.rx first so it throws if s() wasn't passed a box...
     box.rx.add(rx);
     rx.sr.add(box);
-    console.log(`s() ${rx.id} 🔗 ${box.id}`);
+    // console.log(`s() ${rx.id} 🔗 ${box.id}`);
     sRead = true;
     const value = box();
     sRead = false;
     return value;
   };
-  const prevActive = rxActive;
+  const prev = rxActive;
   rxActive = rx;
-  // Drop everything in the tree like Sinuous'/S.js' automatic memory management
+  // Drop everything in the tree like Sinuous/S.js "automatic memory management"
   _rxUnsubscribe(rx);
   let error;
   try {
@@ -75,11 +71,11 @@ const _rxRun = (rx) => {
     if (rx.sr.size) {
       rx.state = state.ON;
     }
-    console.log(`Run ${rx.runs}: ${rx.sr.size}/${rx.sr.size + rx.pr.size} reads subscribed`);
+    // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
   } catch (err) {
     error = err;
   }
-  rxActive = prevActive;
+  rxActive = prev;
   if (error) throw error;
 };
 
@@ -107,12 +103,12 @@ const createBox = (k, v) => {
   const box = (...args) => {
     if (args.length) {
       const [nextValue] = args;
-      console.log(`Write ${box.id}:`, saved, '➡', nextValue, `Notifying ${box.rx.size} reactions`);
-      if (transactionQueue) {
-        if (box.pending === EMPTY_ARR) {
-          transactionQueue.push(box);
+      // console.log(`Write ${box.id}:`, saved, '➡', nextValue, `Notifying ${box.rx.size} reactions`);
+      if (transactioned) {
+        if (box.next === EMPTY_ARR) {
+          transactioned.push(box);
         }
-        box.pending = nextValue;
+        box.next = nextValue;
         // Don't save
         return nextValue;
       }
@@ -136,12 +132,12 @@ const createBox = (k, v) => {
       // Don't return a value; keeps it simple
       return;
     }
-    if (rxActive) {
-      console.log(sRead
-        ? `Sub-read ${box.id}; rxActive ${rxActive.id}`
-        : `Pass-read ${box.id}; rxActive ${rxActive.id}`
-      );
-    }
+    // if (rxActive) {
+    //   console.log(sRead
+    //     ? `Sub-read ${box.id}; rxActive ${rxActive.id}`
+    //     : `Pass-read ${box.id}; rxActive ${rxActive.id}`
+    //   );
+    // }
     if (rxActive && !sRead) {
       if (rxActive.sr.has(box)) throw new Error(`Mixed reads sr/pr ${box.id}`);
       rxActive.pr.add(box);
@@ -150,7 +146,7 @@ const createBox = (k, v) => {
   };
   box.id = `B${boxId++}-${k || '?'}`;
   box.rx = new Set();
-  box.pending = EMPTY_ARR;
+  box.next = EMPTY_ARR;
   return box;
 };
 
@@ -160,20 +156,28 @@ const createBoxes = obj => {
 };
 
 const transaction = (fn) => {
-  const prevTQ = transactionQueue;
-  transactionQueue = [];
+  const prev = transactioned;
+  transactioned = [];
   const value = fn();
-  const boxes = transactionQueue;
-  transactionQueue = prevTQ;
+  const boxes = transactioned;
+  transactioned = prev;
   boxes.forEach(box => {
-    if (box.pending !== EMPTY_ARR) {
-      const { pending } = box;
-      box.pending = EMPTY_ARR;
-      box(pending);
+    if (box.next !== EMPTY_ARR) {
+      const { next } = box;
+      box.next = EMPTY_ARR;
+      box(next);
     }
   });
   return value;
 };
 
+const adopt = (rxParent, fn) => {
+  const prev = rxActive;
+  rxActive = rxParent;
+  const ret = fn();
+  rxActive = prev;
+  return ret;
+};
+
 // export { live, createRx as rx, createBoxes as boxes };
-module.exports = { rx: createRx, boxes: createBoxes, transaction };
+module.exports = { rx: createRx, boxes: createBoxes, transaction, adopt };
