@@ -1,39 +1,38 @@
 let boxId = 0;
 let reactionId = 0;
 
-// Registry of reaction parents (and therefore all known reactions)
-let rxParentLookup = new WeakMap();
 // Current reaction
 let rxActive = undefined;
 // To skip the subbed consistency check during an s(box) read
 let sRead = false;
 // Transactions
-let transactioned = [];
+let transactionBoxes = new Set();
+// Last error (gzip 701 to 688)
+let error;
+
+// Registry of reaction parents (and therefore all known reactions)
+const rxTree = new WeakMap();
 
 // Unique value to compare with `===` since Symbol() doesn't gzip well
-const EMPTY_ARR = [];
-
-// Reactions can be in one of these states
-const state = {
-  ON: 1,
-  PAUSED: 2,
-  PAUSED_STALE: 3,
-  OFF: 4,
-};
+const BOX_NEXT_EMPTY     = new Symbol();
+const STATE_ON           = new Symbol();
+const STATE_PAUSED       = new Symbol();
+const STATE_PAUSED_STALE = new Symbol();
+const STATE_OFF          = new Symbol();
 
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
-  rx.id = `R${reactionId++}-${fn.name || '?'}`;
+  rx.id = `R${reactionId++}=${fn.name}`;
   rx.fn = fn;
   rx.sr = new Set(); // Set<Box>
   rx.pr = new Set(); // Set<Box>
   rx.runs = 0;
-  rx.children = []; // Rx[]. Not a set because it's always small
-  rx.state = state.ON;
+  rx.children = new Set(); // Set<Rx>
+  rx.state = STATE_ON;
   rx.pause = () => _rxPause(rx);
   rx.unsubscribe = () => _rxUnsubscribe(rx);
   // console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
-  rxParentLookup.set(rx, rxActive); // Maybe undefined; that's fine
+  rxTree.set(rx, rxActive); // Maybe undefined; that's fine
   if (rxActive) rxActive.children.push(rx);
   rx();
   return rx;
@@ -41,16 +40,16 @@ const createRx = (fn) => {
 
 // This takes a meta object because honestly you shouldn't use it directly?
 const _rxRun = (rx) => {
-  if (rx.state === state.PAUSED) {
+  if (rx.state === STATE_PAUSED) {
     // The reaction never reached PAUSED_STALE so nothing's changed. Maybe our
     // children need to update though:
-    rx.state = state.ON;
+    rx.state = STATE_ON;
     rx.children.forEach(_rxRun);
     return;
   }
   // Define the subscription function
   const s = box => {
-    if (rx.pr.has(box)) throw new Error(`Mixed reads pr/sr ${box.id}`);
+    if (rx.pr.has(box)) throw new Error(`Mixed pr/sr ${box.id}`);
     // Add to box.rx first so it throws if s() wasn't passed a box...
     box.rx.add(rx);
     rx.sr.add(box);
@@ -64,13 +63,11 @@ const _rxRun = (rx) => {
   rxActive = rx;
   // Drop everything in the tree like Sinuous/S.js "automatic memory management"
   _rxUnsubscribe(rx);
-  let error;
   try {
+    error = undefined;
     rx.fn(s);
     rx.runs++;
-    if (rx.sr.size) {
-      rx.state = state.ON;
-    }
+    if (rx.sr.size) rx.state = STATE_ON;
     // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
   } catch (err) {
     error = err;
@@ -80,21 +77,19 @@ const _rxRun = (rx) => {
 };
 
 const _rxUnsubscribe = (rx) => {
-  if (!rx.runs) {
-    // There aren't any connections if the reaction has never run
-    return;
-  }
+  // Skip if the reaction has never run; there aren't any connections
+  if (!rx.runs) return;
   rx.children.forEach(_rxUnsubscribe);
-  rx.children = [];
+  rx.children = new Set();
   rx.sr.forEach(box => box.rx.delete(rx));
-  rx.sr.clear();
-  rx.pr.clear();
-  rx.state = state.OFF;
+  rx.sr = new Set();
+  rx.pr = new Set();
+  rx.state = STATE_OFF;
 };
 
 const _rxPause = (rx) => {
   rx.children.forEach(_rxPause);
-  rx.state = state.PAUSED;
+  rx.state = STATE_PAUSED;
 };
 
 const createBox = (k, v) => {
@@ -104,30 +99,25 @@ const createBox = (k, v) => {
     if (args.length) {
       const [nextValue] = args;
       // console.log(`Write ${box.id}:`, saved, '➡', nextValue, `Notifying ${box.rx.size} reactions`);
-      if (transactioned) {
-        if (box.next === EMPTY_ARR) {
-          transactioned.push(box);
-        }
+      if (transactionBoxes) {
+        transactionBoxes.add(box);
         box.next = nextValue;
         // Don't save
-        return nextValue;
+        return;
       }
       saved = nextValue;
       // Duplicate the set else it's an infinite loop...
       // Needs to be ordered by parent->child
       const toRun = new Set(box.rx);
       toRun.forEach(rx => {
-        const rxParent = rxParentLookup.get(rx);
+        const rxParent = rxTree.get(rx);
         if (rxParent && toRun.has(rxParent)) {
-          // Parent has unsubscribed (rx.state === state.OFF)
+          // Parent has unsubscribed (rx.state === STATE_OFF)
           // This rx has been superceded; unfortunately
           rx = rxParent;
         }
-        if (rx.state === state.PAUSED) {
-          rx.state = state.PAUSED_STALE;
-        } else {
-          _rxRun(rx);
-        }
+        if (rx.state === STATE_PAUSED) rx.state = STATE_PAUSED_STALE;
+        else _rxRun(rx);
       });
       // Don't return a value; keeps it simple
       return;
@@ -139,14 +129,14 @@ const createBox = (k, v) => {
     //   );
     // }
     if (rxActive && !sRead) {
-      if (rxActive.sr.has(box)) throw new Error(`Mixed reads sr/pr ${box.id}`);
+      if (rxActive.sr.has(box)) throw new Error(`Mixed sr/pr ${box.id}`);
       rxActive.pr.add(box);
     }
     return saved;
   };
-  box.id = `B${boxId++}-${k || '?'}`;
+  box.id = `B${boxId++}=${k}`;
   box.rx = new Set();
-  box.next = EMPTY_ARR;
+  box.next = BOX_NEXT_EMPTY;
   return box;
 };
 
@@ -156,17 +146,16 @@ const createBoxes = obj => {
 };
 
 const transaction = (fn) => {
-  const prev = transactioned;
-  transactioned = [];
+  const prev = transactionBoxes;
+  transactionBoxes = new Set();
   const value = fn();
-  const boxes = transactioned;
-  transactioned = prev;
+  const boxes = transactionBoxes;
+  transactionBoxes = prev;
   boxes.forEach(box => {
-    if (box.next !== EMPTY_ARR) {
-      const { next } = box;
-      box.next = EMPTY_ARR;
-      box(next);
-    }
+    // XXX: Sinuous does `if (box.next !== BOX_NEXT_EMPTY) { ... }` wrapper
+    const { next } = box;
+    box.next = BOX_NEXT_EMPTY;
+    box(next);
   });
   return value;
 };
@@ -174,10 +163,16 @@ const transaction = (fn) => {
 const adopt = (rxParent, fn) => {
   const prev = rxActive;
   rxActive = rxParent;
-  const ret = fn();
+  let ret;
+  try {
+    error = undefined;
+    ret = fn();
+  } catch (err) {
+    error = err;
+  }
   rxActive = prev;
+  if (error) throw error;
   return ret;
 };
 
-// export { live, createRx as rx, createBoxes as boxes };
-module.exports = { rx: createRx, boxes: createBoxes, transaction, adopt };
+export { createRx as rx, createBoxes as boxes, transaction, adopt, rxTree };

@@ -13,7 +13,9 @@
     "typescript": "^4.1.3"
   },
   "scripts": {
-    "test": "node ./test.js"
+    "test": "node ./test.js",
+    "build": "cat ./src/sLocal.js | sed s/const/let/ | esbuild --minify --format=esm",
+    "build:size": "echo $(npm run --silent build | gzip -9 | wc -c) bytes min+gzip"
   },
   "keywords": [],
   "author": "Gen Hames",
