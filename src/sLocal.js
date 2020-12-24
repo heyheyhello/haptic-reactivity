@@ -14,11 +14,12 @@ let error;
 const rxTree = new WeakMap();
 
 // Unique value to compare with `===` since Symbol() doesn't gzip well
-const BOX_NEXT_EMPTY     = Symbol();
-const STATE_ON           = Symbol();
+const STATE_SUBSCRIBED   = Symbol();
+const STATE_RUNNING      = Symbol();
 const STATE_PAUSED       = Symbol();
 const STATE_PAUSED_STALE = Symbol();
-const STATE_OFF          = Symbol();
+const STATE_UNSUBSCRIBED = Symbol();
+const BOX_NEXT_EMPTY     = Symbol();
 
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
@@ -28,7 +29,6 @@ const createRx = (fn) => {
   rx.pr = new Set(); // Set<Box>
   rx.runs = 0;
   rx.children = new Set(); // Set<Rx>
-  rx.state = STATE_ON;
   rx.pause = () => _rxPause(rx);
   rx.unsubscribe = () => _rxUnsubscribe(rx);
   // console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
@@ -43,13 +43,18 @@ const _rxRun = (rx) => {
   if (rx.state === STATE_PAUSED) {
     // The reaction never reached PAUSED_STALE so nothing's changed. Maybe our
     // children need to update though:
-    rx.state = STATE_ON;
+    rx.state = STATE_SUBSCRIBED;
     rx.children.forEach(_rxRun);
     return;
   }
+  if (rx.state === STATE_RUNNING) {
+    throw new Error('Loop rx');
+  }
   // Define the subscription function
   const s = box => {
-    if (rx.pr.has(box)) throw new Error(`Mixed pr/sr ${box.id}`);
+    if (rx.pr.has(box)) {
+      throw new Error(`Mixed pr/sr ${box.id}`);
+    }
     // Add to box.rx first so it throws if s() wasn't passed a box...
     box.rx.add(rx);
     rx.sr.add(box);
@@ -59,15 +64,20 @@ const _rxRun = (rx) => {
     sRead = false;
     return value;
   };
+
   const prev = rxActive;
   rxActive = rx;
   // Drop everything in the tree like Sinuous/S.js "automatic memory management"
   _rxUnsubscribe(rx);
+  rx.state = STATE_RUNNING;
   try {
     error = undefined;
     rx.fn(s);
     rx.runs++;
-    if (rx.sr.size) rx.state = STATE_ON;
+    if (rx.sr.size) {
+      // Otherwise it stays as unsubscribed following _rxUnsubscribe()
+      rx.state = STATE_SUBSCRIBED;
+    }
     // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
   } catch (err) {
     error = err;
@@ -77,6 +87,7 @@ const _rxRun = (rx) => {
 };
 
 const _rxUnsubscribe = (rx) => {
+  rx.state = STATE_UNSUBSCRIBED;
   // Skip if the reaction has never run; there aren't any connections
   if (!rx.runs) return;
   rx.children.forEach(_rxUnsubscribe);
@@ -84,7 +95,6 @@ const _rxUnsubscribe = (rx) => {
   rx.sr.forEach(box => box.rx.delete(rx));
   rx.sr = new Set();
   rx.pr = new Set();
-  rx.state = STATE_OFF;
 };
 
 const _rxPause = (rx) => {
@@ -112,14 +122,16 @@ const createBox = (k, v) => {
       toRun.forEach(rx => {
         const rxParent = rxTree.get(rx);
         if (rxParent && toRun.has(rxParent)) {
-          // Parent has unsubscribed (rx.state === STATE_OFF)
-          // This rx has been superceded; unfortunately
+          // Parent has unsubscribed/removed this rx (rx.state === STATE_OFF)
           rx = rxParent;
         }
-        if (rx.state === STATE_PAUSED) rx.state = STATE_PAUSED_STALE;
-        else _rxRun(rx);
+        if (rx.state === STATE_PAUSED) {
+          rx.state = STATE_PAUSED_STALE;
+        } else {
+          _rxRun(rx);
+        }
       });
-      // Don't return a value; keeps it simple
+      // Don't return a value; keep the API simple
       return;
     }
     // if (rxActive) {
@@ -129,7 +141,9 @@ const createBox = (k, v) => {
     //   );
     // }
     if (rxActive && !sRead) {
-      if (rxActive.sr.has(box)) throw new Error(`Mixed sr/pr ${box.id}`);
+      if (rxActive.sr.has(box)) {
+        throw new Error(`Mixed sr/pr ${box.id}`);
+      }
       rxActive.pr.add(box);
     }
     return saved;
