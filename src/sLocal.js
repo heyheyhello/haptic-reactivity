@@ -14,11 +14,11 @@ let error;
 const rxTree = new WeakMap();
 
 // Unique value to compare with `===` since Symbol() doesn't gzip well
-const STATE_SUBSCRIBED   = Symbol();
+const STATE_ON           = Symbol();
 const STATE_RUNNING      = Symbol();
 const STATE_PAUSED       = Symbol();
 const STATE_PAUSED_STALE = Symbol();
-const STATE_UNSUBSCRIBED = Symbol();
+const STATE_OFF          = Symbol();
 const BOX_NEXT_EMPTY     = Symbol();
 
 const createRx = (fn) => {
@@ -29,6 +29,7 @@ const createRx = (fn) => {
   rx.pr = new Set(); // Set<Box>
   rx.runs = 0;
   rx.children = new Set(); // Set<Rx>
+  rx.state = STATE_OFF;
   rx.pause = () => _rxPause(rx);
   rx.unsubscribe = () => _rxUnsubscribe(rx);
   // console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
@@ -41,9 +42,9 @@ const createRx = (fn) => {
 // This takes a meta object because honestly you shouldn't use it directly?
 const _rxRun = (rx) => {
   if (rx.state === STATE_PAUSED) {
-    // The reaction never reached PAUSED_STALE so nothing's changed. Maybe our
-    // children need to update though:
-    rx.state = STATE_SUBSCRIBED;
+    // Never reached STATE_PAUSED_STALE so nothing's changed. There are still
+    // subscriptions, so return to STATE_ON. Children might update though.
+    rx.state = STATE_ON;
     rx.children.forEach(_rxRun);
     return;
   }
@@ -76,7 +77,7 @@ const _rxRun = (rx) => {
     rx.runs++;
     if (rx.sr.size) {
       // Otherwise it stays as unsubscribed following _rxUnsubscribe()
-      rx.state = STATE_SUBSCRIBED;
+      rx.state = STATE_ON;
     }
     // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
   } catch (err) {
@@ -87,7 +88,7 @@ const _rxRun = (rx) => {
 };
 
 const _rxUnsubscribe = (rx) => {
-  rx.state = STATE_UNSUBSCRIBED;
+  rx.state = STATE_OFF;
   // Skip if the reaction has never run; there aren't any connections
   if (!rx.runs) return;
   rx.children.forEach(_rxUnsubscribe);
