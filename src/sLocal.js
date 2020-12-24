@@ -4,11 +4,9 @@ let reactionId = 0;
 // Current reaction
 let rxActive = undefined;
 // To skip the subbed consistency check during an s(box) read
-let sRead = false;
+let sRead;
 // Transactions
 let transactionBoxes = new Set();
-// Last error (gzip 701 to 688)
-let error;
 
 // Registry of reaction parents (and therefore all known reactions)
 const rxTree = new WeakMap();
@@ -60,9 +58,9 @@ const _rxRun = (rx) => {
     box.rx.add(rx);
     rx.sr.add(box);
     // console.log(`s() ${rx.id} 🔗 ${box.id}`);
-    sRead = true;
+    sRead = 1;
     const value = box();
-    sRead = false;
+    sRead = 0;
     return value;
   };
 
@@ -71,20 +69,14 @@ const _rxRun = (rx) => {
   // Drop everything in the tree like Sinuous/S.js "automatic memory management"
   _rxUnsubscribe(rx);
   rx.state = STATE_RUNNING;
-  try {
-    error = undefined;
-    rx.fn(s);
-    rx.runs++;
-    if (rx.sr.size) {
-      // Otherwise it stays as unsubscribed following _rxUnsubscribe()
-      rx.state = STATE_ON;
-    }
-    // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
-  } catch (err) {
-    error = err;
+  rx.fn(s);
+  rx.runs++;
+  if (rx.sr.size) {
+    // Otherwise it stays as unsubscribed following _rxUnsubscribe()
+    rx.state = STATE_ON;
   }
+  // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
   rxActive = prev;
-  if (error) throw error;
 };
 
 const _rxUnsubscribe = (rx) => {
@@ -178,15 +170,8 @@ const transaction = (fn) => {
 const adopt = (rxParent, fn) => {
   const prev = rxActive;
   rxActive = rxParent;
-  let ret;
-  try {
-    error = undefined;
-    ret = fn();
-  } catch (err) {
-    error = err;
-  }
+  let ret = fn();
   rxActive = prev;
-  if (error) throw error;
   return ret;
 };
 
