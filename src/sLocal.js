@@ -2,7 +2,7 @@ let boxId = 0;
 let reactionId = 0;
 
 // Current reaction
-let rxActive = undefined;
+let rxActive;
 // To skip the subbed consistency check during an s(box) read
 let sRead;
 // Transactions
