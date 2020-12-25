@@ -49,7 +49,7 @@ const _rxRun = (rx) => {
     return;
   }
   if (rx.state === STATE_RUNNING) {
-    throw new Error('Loop rx');
+    throw new Error(`Loop ${rx.id}`);
   }
   // Define the subscription function
   const s = box => {
@@ -72,10 +72,7 @@ const _rxRun = (rx) => {
   }
   rx.state = STATE_RUNNING;
   adopt(rx, () => rx.fn(s));
-  if (rx.sr.size) {
-    // Otherwise it stays as unsubscribed following _rxUnsubscribe()
-    rx.state = STATE_ON;
-  }
+  rx.state = rx.sr.size ? STATE_ON : STATE_OFF;
   // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
 };
 
