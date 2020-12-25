@@ -1,3 +1,5 @@
+/* eslint-disable no-multi-spaces */
+
 let boxId = 0;
 let reactionId = 0;
 
