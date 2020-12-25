@@ -155,9 +155,16 @@ const createBoxes = obj => {
 const transaction = (fn) => {
   const prev = transactionBoxes;
   transactionBoxes = new Set();
-  const value = fn();
+  let error;
+  let value;
+  try {
+    value = fn();
+  } catch (err) {
+    error = err;
+  }
   const boxes = transactionBoxes;
   transactionBoxes = prev;
+  if (error) throw error;
   boxes.forEach(box => {
     // XXX: Sinuous does `if (box.next !== BOX_NEXT_EMPTY) { ... }` wrapper
     const { next } = box;
@@ -170,9 +177,16 @@ const transaction = (fn) => {
 const adopt = (rxParent, fn) => {
   const prev = rxActive;
   rxActive = rxParent;
-  let ret = fn();
+  let error;
+  let value;
+  try {
+    value = fn();
+  } catch (err) {
+    error = err;
+  }
   rxActive = prev;
-  return ret;
+  if (error) throw error;
+  return value;
 };
 
 export { createRx as rx, createBoxes as boxes, transaction, adopt, rxTree };
