@@ -12,12 +12,12 @@ let transactionBoxes = new Set();
 const rxTree = new WeakMap();
 
 // Unique value to compare with `===` since Symbol() doesn't gzip well
-const STATE_ON           = Symbol();
-const STATE_RUNNING      = Symbol();
-const STATE_PAUSED       = Symbol();
-const STATE_PAUSED_STALE = Symbol();
-const STATE_OFF          = Symbol();
-const BOX_NEXT_EMPTY     = Symbol();
+const STATE_ON           = []; // Symbol();
+const STATE_RUNNING      = []; // Symbol();
+const STATE_PAUSED       = []; // Symbol();
+const STATE_PAUSED_STALE = []; // Symbol();
+const STATE_OFF          = []; // Symbol();
+const BOX_NEXT_EMPTY     = []; // Symbol();
 
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
