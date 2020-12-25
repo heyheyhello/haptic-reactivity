@@ -26,13 +26,13 @@ const createRx = (fn) => {
   rx.sr = new Set(); // Set<Box>
   rx.pr = new Set(); // Set<Box>
   rx.runs = 0;
-  rx.children = new Set(); // Set<Rx>
+  rx.inner = new Set(); // Set<Rx>
   rx.state = STATE_OFF;
   rx.pause = () => _rxPause(rx);
   rx.unsubscribe = () => _rxUnsubscribe(rx);
-  // console.log(`Created ${rx.id}`, rxActive ? `; child of ${rxActive.id}` : '');
+  // console.log(`Created ${rx.id}`, rxActive ? `; inner of ${rxActive.id}` : '');
   rxTree.set(rx, rxActive); // Maybe undefined; that's fine
-  if (rxActive) rxActive.children.push(rx);
+  if (rxActive) rxActive.inner.push(rx);
   rx();
   return rx;
 };
@@ -41,9 +41,9 @@ const createRx = (fn) => {
 const _rxRun = (rx) => {
   if (rx.state === STATE_PAUSED) {
     // Never reached STATE_PAUSED_STALE so nothing's changed. There are still
-    // subscriptions, so return to STATE_ON. Children might update though.
+    // subscriptions so return to STATE_ON. Inner reactions might update though
     rx.state = STATE_ON;
-    rx.children.forEach(_rxRun);
+    rx.inner.forEach(_rxRun);
     return;
   }
   if (rx.state === STATE_RUNNING) {
@@ -67,10 +67,12 @@ const _rxRun = (rx) => {
   const prev = rxActive;
   rxActive = rx;
   // Drop everything in the tree like Sinuous/S.js "automatic memory management"
-  _rxUnsubscribe(rx);
+  // but skip if its the first run since there aren't any connections
+  if (rx.runs++) {
+    _rxUnsubscribe(rx);
+  }
   rx.state = STATE_RUNNING;
   rx.fn(s);
-  rx.runs++;
   if (rx.sr.size) {
     // Otherwise it stays as unsubscribed following _rxUnsubscribe()
     rx.state = STATE_ON;
@@ -81,18 +83,16 @@ const _rxRun = (rx) => {
 
 const _rxUnsubscribe = (rx) => {
   rx.state = STATE_OFF;
-  // Skip if the reaction has never run; there aren't any connections
-  if (!rx.runs) return;
-  rx.children.forEach(_rxUnsubscribe);
-  rx.children = new Set();
+  rx.inner.forEach(_rxUnsubscribe);
+  rx.inner = new Set();
   rx.sr.forEach(box => box.rx.delete(rx));
   rx.sr = new Set();
   rx.pr = new Set();
 };
 
 const _rxPause = (rx) => {
-  rx.children.forEach(_rxPause);
   rx.state = STATE_PAUSED;
+  rx.inner.forEach(_rxPause);
 };
 
 const createBox = (k, v) => {
