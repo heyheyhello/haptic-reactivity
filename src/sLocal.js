@@ -63,22 +63,18 @@ const _rxRun = (rx) => {
     sRead = 0;
     return value;
   };
-
-  const prev = rxActive;
-  rxActive = rx;
   // Drop everything in the tree like Sinuous/S.js "automatic memory management"
   // but skip if its the first run since there aren't any connections
   if (rx.runs++) {
     _rxUnsubscribe(rx);
   }
   rx.state = STATE_RUNNING;
-  rx.fn(s);
+  adopt(rx, () => rx.fn(s));
   if (rx.sr.size) {
     // Otherwise it stays as unsubscribed following _rxUnsubscribe()
     rx.state = STATE_ON;
   }
   // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
-  rxActive = prev;
 };
 
 const _rxUnsubscribe = (rx) => {
