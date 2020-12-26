@@ -13,12 +13,11 @@ let transactionBatch;
 const rxTree = new WeakMap();
 
 // Unique value to compare with `===` since Symbol() doesn't gzip well
-const STATE_ON           = []; // Symbol();
-const STATE_RUNNING      = []; // Symbol();
-const STATE_PAUSED       = []; // Symbol();
-const STATE_PAUSED_STALE = []; // Symbol();
-const STATE_OFF          = []; // Symbol();
-const BOX_NEXT_EMPTY     = []; // Symbol();
+const STATE_ON           = [];
+const STATE_RUNNING      = [];
+const STATE_PAUSED       = [];
+const STATE_PAUSED_STALE = [];
+const STATE_OFF          = [];
 
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
@@ -134,10 +133,9 @@ const createBoxes = obj => {
       });
       // Don't return a value; keep the API simple
     };
-    box.id   = `B${boxId++}=${k}`;
-    box.rx   = new Set();
-    box.next = BOX_NEXT_EMPTY;
-    obj[k]   = box;
+    box.id = `B${boxId++}=${k}`;
+    box.rx = new Set();
+    obj[k] = box;
   });
   return obj;
 };
@@ -152,14 +150,13 @@ const transaction = (fn) => {
   } catch (err) {
     error = err;
   }
-  const boxes = transactionBatch;
+  const boxesWritten = transactionBatch;
   transactionBatch = prev;
   if (error) throw error;
-  boxes.forEach(box => {
-    // XXX: Sinuous does `if (box.next !== BOX_NEXT_EMPTY) { ... }` wrapper
-    const { next } = box;
-    box.next = BOX_NEXT_EMPTY;
-    box(next);
+  // XXX: Sinuous does `if (box.next !== STATE_OFF) { ... }` wrapper
+  boxesWritten.forEach(box => {
+    box(box.next);
+    delete box.next;
   });
   return value;
 };
