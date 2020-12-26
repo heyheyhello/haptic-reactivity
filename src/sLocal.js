@@ -21,13 +21,10 @@ const STATE_OFF          = [];
 
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
-  rx.id    = `R${reactionId++}=${fn.name}`;
-  rx.fn    = fn;
-  rx.sr    = new Set(); // Set<Box>
-  rx.pr    = new Set(); // Set<Box>
-  rx.runs  = 0;
-  rx.inner = new Set(); // Set<Rx>
-  rx.state = STATE_OFF;
+  rx.id = `R${reactionId++}=${fn.name}`;
+  rx.fn = fn;
+  rx.runs = 0;
+  // Other properties are setup in rx()>_rxRun()>_rxUnsubscribe()
   rx.pause = () => _rxPause(rx);
   rx.unsubscribe = () => _rxUnsubscribe(rx);
   // console.log(`Created ${rx.id}`, rxActive ? `; inner of ${rxActive.id}` : '');
@@ -49,8 +46,12 @@ const _rxRun = (rx) => {
   if (rx.state === STATE_RUNNING) {
     throw new Error(`Loop ${rx.id}`);
   }
-  // Define the subscription function
-  const s = box => {
+  // Drop everything in the tree like Sinuous/S.js "automatic memory management"
+  // but skip if its the first run since there aren't any connections
+  _rxUnsubscribe(rx);
+  rx.state = STATE_RUNNING;
+  // Define the subscription function, s, as a parameter to rx.fn()
+  adopt(rx, () => rx.fn(box => {
     if (rx.pr.has(box)) {
       throw new Error(`Mixed pr/sr ${box.id}`);
     }
@@ -62,25 +63,22 @@ const _rxRun = (rx) => {
     const value = box();
     sRead = 0;
     return value;
-  };
-  // Drop everything in the tree like Sinuous/S.js "automatic memory management"
-  // but skip if its the first run since there aren't any connections
-  if (rx.runs++) {
-    _rxUnsubscribe(rx);
-  }
-  rx.state = STATE_RUNNING;
-  adopt(rx, () => rx.fn(s));
+  }));
+  rx.runs++;
   rx.state = rx.sr.size ? STATE_ON : STATE_OFF;
   // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
 };
 
 const _rxUnsubscribe = (rx) => {
   rx.state = STATE_OFF;
-  rx.inner.forEach(_rxUnsubscribe);
-  rx.inner = new Set();
-  rx.sr.forEach(box => box.rx.delete(rx));
+  if (rx.runs) {
+    // These are only defined once the reaction has been setup and run before
+    rx.inner.forEach(_rxUnsubscribe);
+    rx.sr.forEach(box => box.rx.delete(rx));
+  }
   rx.sr = new Set();
   rx.pr = new Set();
+  rx.inner = new Set();
 };
 
 const _rxPause = (rx) => {
@@ -153,7 +151,6 @@ const transaction = (fn) => {
   const boxesWritten = transactionBatch;
   transactionBatch = prev;
   if (error) throw error;
-  // XXX: Sinuous does `if (box.next !== STATE_OFF) { ... }` wrapper
   boxesWritten.forEach(box => {
     box(box.next);
     delete box.next;
