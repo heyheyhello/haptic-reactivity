@@ -1,13 +1,9 @@
 /* eslint-disable prefer-destructuring,no-multi-spaces */
 let boxId = 0;
 let reactionId = 0;
-
-// Current reaction
-let rxActive;
-// To skip the subbed consistency check during an s(box) read
-let sRead;
-// Transactions
-let transactionBatch;
+let rxActive;         // Current reaction
+let sRead;            // Skip the read consistency check during s(box)
+let transactionBatch; // Boxes written to during a transaction(() => {...})
 
 // Registry of reaction parents (and therefore all known reactions)
 const rxTree = new WeakMap();
@@ -27,7 +23,6 @@ const createRx = (fn) => {
   // Other properties are setup in rx()>_rxRun()>_rxUnsubscribe()
   rx.pause = () => _rxPause(rx);
   rx.unsubscribe = () => _rxUnsubscribe(rx);
-  // console.log(`Created ${rx.id}`, rxActive ? `; inner of ${rxActive.id}` : '');
   rxTree.set(rx, rxActive); // Maybe undefined; that's fine
   if (rxActive) rxActive.inner.push(rx);
   rx();
@@ -55,10 +50,9 @@ const _rxRun = (rx) => {
     if (rx.pr.has(box)) {
       throw new Error(`Mixed pr/sr ${box.id}`);
     }
-    // Add to box.rx first so it throws if s() wasn't passed a box...
+    // Use box.rx first so it throws if s() wasn't passed a box
     box.rx.add(rx);
     rx.sr.add(box);
-    // console.log(`s() ${rx.id} 🔗 ${box.id}`);
     sRead = 1;
     const value = box();
     sRead = 0;
@@ -66,7 +60,6 @@ const _rxRun = (rx) => {
   }));
   rx.runs++;
   rx.state = rx.sr.size ? STATE_ON : STATE_OFF;
-  // console.log(`Run ${rx.runs}: ${rx.sr.size}sr ${rx.pr.size}pr`);
 };
 
 const _rxUnsubscribe = (rx) => {
@@ -91,12 +84,6 @@ const createBoxes = obj => {
     let saved = obj[k];
     const box = (...args) => {
       if (!args.length) {
-        // if (rxActive) {
-        //   console.log(sRead
-        //     ? `Sub-read ${box.id}; rxActive ${rxActive.id}`
-        //     : `Pass-read ${box.id}; rxActive ${rxActive.id}`
-        //   );
-        // }
         if (rxActive && !sRead) {
           if (rxActive.sr.has(box)) {
             throw new Error(`Mixed sr/pr ${box.id}`);
@@ -105,19 +92,18 @@ const createBoxes = obj => {
         }
         return saved;
       }
-      // Smaller bundle to use args[0] than destructing into a variable
-      // console.log(`Write ${box.id}:`, saved, '➡', args[0], `Notifying ${box.rx.size} reactions`);
       if (transactionBatch) {
         transactionBatch.add(box);
+        // Bundle size: args[0] is smaller than destructing
         box.next = args[0];
         // Don't save
         return;
       }
       saved = args[0];
       // Duplicate the set else it's an infinite loop...
-      // Needs to be ordered by parent->child
       const toRun = new Set(box.rx);
       toRun.forEach(rx => {
+        // Calls are ordered by parent->child
         const rxParent = rxTree.get(rx);
         if (rxParent && toRun.has(rxParent)) {
           // Parent has unsubscribed/removed this rx (rx.state === STATE_OFF)
@@ -129,7 +115,7 @@ const createBoxes = obj => {
           _rxRun(rx);
         }
       });
-      // Don't return a value; keep the API simple
+      // Boxes don't return the value on write, unlike Sinuous/S.js
     };
     box.id = `B${boxId++}=${k}`;
     box.rx = new Set();
