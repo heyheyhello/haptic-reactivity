@@ -7,7 +7,7 @@ let rxActive;
 // To skip the subbed consistency check during an s(box) read
 let sRead;
 // Transactions
-let transactionBoxes = new Set();
+let transactionBatch;
 
 // Registry of reaction parents (and therefore all known reactions)
 const rxTree = new WeakMap();
@@ -110,8 +110,8 @@ const createBoxes = obj => {
       }
       // Smaller bundle to use args[0] than destructing into a variable
       // console.log(`Write ${box.id}:`, saved, '➡', args[0], `Notifying ${box.rx.size} reactions`);
-      if (transactionBoxes) {
-        transactionBoxes.add(box);
+      if (transactionBatch) {
+        transactionBatch.add(box);
         box.next = args[0];
         // Don't save
         return;
@@ -143,8 +143,8 @@ const createBoxes = obj => {
 };
 
 const transaction = (fn) => {
-  const prev = transactionBoxes;
-  transactionBoxes = new Set();
+  const prev = transactionBatch;
+  transactionBatch = new Set();
   let error;
   let value;
   try {
@@ -152,8 +152,8 @@ const transaction = (fn) => {
   } catch (err) {
     error = err;
   }
-  const boxes = transactionBoxes;
-  transactionBoxes = prev;
+  const boxes = transactionBatch;
+  transactionBatch = prev;
   if (error) throw error;
   boxes.forEach(box => {
     // XXX: Sinuous does `if (box.next !== BOX_NEXT_EMPTY) { ... }` wrapper
