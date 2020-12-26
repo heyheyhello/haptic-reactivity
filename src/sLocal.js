@@ -1,4 +1,4 @@
-/* eslint-disable no-multi-spaces */
+/* eslint-disable prefer-destructuring,no-multi-spaces */
 let boxId = 0;
 let reactionId = 0;
 
@@ -22,11 +22,11 @@ const BOX_NEXT_EMPTY     = []; // Symbol();
 
 const createRx = (fn) => {
   const rx = () => _rxRun(rx);
-  rx.id = `R${reactionId++}=${fn.name}`;
-  rx.fn = fn;
-  rx.sr = new Set(); // Set<Box>
-  rx.pr = new Set(); // Set<Box>
-  rx.runs = 0;
+  rx.id    = `R${reactionId++}=${fn.name}`;
+  rx.fn    = fn;
+  rx.sr    = new Set(); // Set<Box>
+  rx.pr    = new Set(); // Set<Box>
+  rx.runs  = 0;
   rx.inner = new Set(); // Set<Rx>
   rx.state = STATE_OFF;
   rx.pause = () => _rxPause(rx);
@@ -89,20 +89,34 @@ const _rxPause = (rx) => {
   rx.inner.forEach(_rxPause);
 };
 
-const createBox = (k, v) => {
-  // Hide the stored value in a closure and not as a property of the box
-  let saved = v;
-  const box = (...args) => {
-    if (args.length) {
-      const [nextValue] = args;
-      // console.log(`Write ${box.id}:`, saved, '➡', nextValue, `Notifying ${box.rx.size} reactions`);
+const createBoxes = obj => {
+  Object.keys(obj).forEach(k => {
+    let saved = obj[k];
+    const box = (...args) => {
+      if (!args.length) {
+        // if (rxActive) {
+        //   console.log(sRead
+        //     ? `Sub-read ${box.id}; rxActive ${rxActive.id}`
+        //     : `Pass-read ${box.id}; rxActive ${rxActive.id}`
+        //   );
+        // }
+        if (rxActive && !sRead) {
+          if (rxActive.sr.has(box)) {
+            throw new Error(`Mixed sr/pr ${box.id}`);
+          }
+          rxActive.pr.add(box);
+        }
+        return saved;
+      }
+      // Smaller bundle to use args[0] than destructing into a variable
+      // console.log(`Write ${box.id}:`, saved, '➡', args[0], `Notifying ${box.rx.size} reactions`);
       if (transactionBoxes) {
         transactionBoxes.add(box);
-        box.next = nextValue;
+        box.next = args[0];
         // Don't save
         return;
       }
-      saved = nextValue;
+      saved = args[0];
       // Duplicate the set else it's an infinite loop...
       // Needs to be ordered by parent->child
       const toRun = new Set(box.rx);
@@ -119,30 +133,12 @@ const createBox = (k, v) => {
         }
       });
       // Don't return a value; keep the API simple
-      return;
-    }
-    // if (rxActive) {
-    //   console.log(sRead
-    //     ? `Sub-read ${box.id}; rxActive ${rxActive.id}`
-    //     : `Pass-read ${box.id}; rxActive ${rxActive.id}`
-    //   );
-    // }
-    if (rxActive && !sRead) {
-      if (rxActive.sr.has(box)) {
-        throw new Error(`Mixed sr/pr ${box.id}`);
-      }
-      rxActive.pr.add(box);
-    }
-    return saved;
-  };
-  box.id = `B${boxId++}=${k}`;
-  box.rx = new Set();
-  box.next = BOX_NEXT_EMPTY;
-  return box;
-};
-
-const createBoxes = obj => {
-  Object.keys(obj).forEach(k => { obj[k] = createBox(k, obj[k]); });
+    };
+    box.id   = `B${boxId++}=${k}`;
+    box.rx   = new Set();
+    box.next = BOX_NEXT_EMPTY;
+    obj[k]   = box;
+  });
   return obj;
 };
 
