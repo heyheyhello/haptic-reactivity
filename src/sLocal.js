@@ -1,8 +1,8 @@
 /* eslint-disable prefer-destructuring,no-multi-spaces */
-let boxId = 0;
+let vocalId = 0;
 let reactionId = 0;
 let rxActive;         // Current reaction
-let sRead;            // Skip the read consistency check during s(box)
+let sRead;            // Skip the read consistency check during s(vocal)
 let transactionBatch; // Boxes written to during a transaction(() => {...})
 
 // Registry of reaction parents (and therefore all known reactions)
@@ -15,9 +15,9 @@ const STATE_PAUSED       = [];
 const STATE_PAUSED_STALE = [];
 const STATE_OFF          = [];
 
-const createRx = (fn) => {
+const rxCreate = (fn) => {
   const rx = () => _rxRun(rx);
-  rx.id = `R${reactionId++}=${fn.name}`;
+  rx.id = `rx-${reactionId++}-${fn.name}`;
   rx.fn = fn;
   rx.runs = 0;
   // Other properties are setup in rx()>_rxRun()>_rxUnsubscribe()
@@ -31,43 +31,43 @@ const createRx = (fn) => {
 
 // This takes a meta object because honestly you shouldn't use it directly?
 const _rxRun = (rx) => {
-  if (rx.state === STATE_PAUSED) {
-    // Never reached STATE_PAUSED_STALE so nothing's changed. There are still
-    // subscriptions so return to STATE_ON. Inner reactions might update though
-    rx.state = STATE_ON;
-    rx.inner.forEach(_rxRun);
-    return;
-  }
   if (rx.state === STATE_RUNNING) {
     throw new Error(`Loop ${rx.id}`);
   }
-  // Drop everything in the tree like Sinuous/S.js "automatic memory management"
-  // but skip if its the first run since there aren't any connections
-  _rxUnsubscribe(rx);
-  rx.state = STATE_RUNNING;
-  // Define the subscription function, s, as a parameter to rx.fn()
-  adopt(rx, () => rx.fn(box => {
-    if (rx.pr.has(box)) {
-      throw new Error(`Mixed pr/sr ${box.id}`);
-    }
-    // Use box.rx first so it throws if s() wasn't passed a box
-    box.rx.add(rx);
-    rx.sr.add(box);
-    sRead = 1;
-    const value = box();
-    sRead = 0;
-    return value;
-  }));
-  rx.runs++;
+  // If STATE_PAUSED then STATE_PAUSED_STALE was never reached; nothing has
+  // changed. Restore state (below) and call inner reactions so they can check
+  if (rx.state === STATE_PAUSED) {
+    rx.inner.forEach(_rxRun);
+  } else {
+    // Symmetrically remove all connections from rx/vocals. This is "automatic
+    // memory management" in Sinuous/S.js
+    _rxUnsubscribe(rx);
+    rx.state = STATE_RUNNING;
+    // Define the subscription function, s(vocal), as a parameter to rx.fn()
+    adopt(rx, () => rx.fn(vocal => {
+      if (rx.pr.has(vocal)) {
+        throw new Error(`Mixed pr/sr ${vocal.id}`);
+      }
+      // Symmetrically link. Use vocal.rx to throw if s() wasn't passed a vocal
+      vocal.rx.add(rx);
+      rx.sr.add(vocal);
+      sRead = 1;
+      const value = vocal();
+      sRead = 0;
+      return value;
+    }));
+    rx.runs++;
+  }
   rx.state = rx.sr.size ? STATE_ON : STATE_OFF;
 };
 
 const _rxUnsubscribe = (rx) => {
   rx.state = STATE_OFF;
+  // This is skipped for newly created reactions
   if (rx.runs) {
     // These are only defined once the reaction has been setup and run before
     rx.inner.forEach(_rxUnsubscribe);
-    rx.sr.forEach(box => box.rx.delete(rx));
+    rx.sr.forEach(v => v.rx.delete(rx));
   }
   rx.sr = new Set();
   rx.pr = new Set();
@@ -79,29 +79,29 @@ const _rxPause = (rx) => {
   rx.inner.forEach(_rxPause);
 };
 
-const createBoxes = obj => {
+const vocalsCreate = obj => {
   Object.keys(obj).forEach(k => {
     let saved = obj[k];
-    const box = (...args) => {
+    const vocal = (...args) => {
       if (!args.length) {
         if (rxActive && !sRead) {
-          if (rxActive.sr.has(box)) {
-            throw new Error(`Mixed sr/pr ${box.id}`);
+          if (rxActive.sr.has(vocal)) {
+            throw new Error(`Mixed sr/pr ${vocal.id}`);
           }
-          rxActive.pr.add(box);
+          rxActive.pr.add(vocal);
         }
         return saved;
       }
       if (transactionBatch) {
-        transactionBatch.add(box);
+        transactionBatch.add(vocal);
         // Bundle size: args[0] is smaller than destructing
-        box.next = args[0];
+        vocal.next = args[0];
         // Don't save
         return;
       }
       saved = args[0];
       // Duplicate the set else it's an infinite loop...
-      const toRun = new Set(box.rx);
+      const toRun = new Set(vocal.rx);
       toRun.forEach(rx => {
         // Calls are ordered by parent->child
         const rxParent = rxTree.get(rx);
@@ -117,9 +117,9 @@ const createBoxes = obj => {
       });
       // Boxes don't return the value on write, unlike Sinuous/S.js
     };
-    box.id = `B${boxId++}=${k}`;
-    box.rx = new Set();
-    obj[k] = box;
+    vocal.id = `vocal-${vocalId++}-${k}`;
+    vocal.rx = new Set();
+    obj[k] = vocal;
   });
   return obj;
 };
@@ -134,12 +134,12 @@ const transaction = (fn) => {
   } catch (err) {
     error = err;
   }
-  const boxesWritten = transactionBatch;
+  const vocals = transactionBatch;
   transactionBatch = prev;
   if (error) throw error;
-  boxesWritten.forEach(box => {
-    box(box.next);
-    delete box.next;
+  vocals.forEach(v => {
+    v(v.next);
+    delete v.next;
   });
   return value;
 };
@@ -159,4 +159,4 @@ const adopt = (rxParent, fn) => {
   return value;
 };
 
-export { createRx as rx, createBoxes as boxes, transaction, adopt, rxTree };
+export { rxCreate as rx, vocalsCreate as vocals, transaction, adopt, rxTree };
