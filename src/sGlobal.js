@@ -1,3 +1,6 @@
+// This is unrunnable as ESM because it uses Function.caller which isn't allowed
+// It's been replaced with sLocal.js
+
 let boxId = 0;
 let reactionId = 0;
 

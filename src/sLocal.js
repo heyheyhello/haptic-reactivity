@@ -1,5 +1,4 @@
 /* eslint-disable no-multi-spaces */
-
 let boxId = 0;
 let reactionId = 0;
 
@@ -185,4 +184,3 @@ const adopt = (rxParent, fn) => {
 };
 
 export { createRx as rx, createBoxes as boxes, transaction, adopt, rxTree };
-// module.exports = { rx: createRx, boxes: createBoxes, transaction, adopt, rxTree };

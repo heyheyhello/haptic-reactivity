@@ -6,6 +6,7 @@
   "directories": {
     "test": "test"
   },
+  "type": "module",
   "devDependencies": {
     "esbuild": "^0.8.26",
     "eslint": "^7.16.0",
