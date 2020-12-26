@@ -42,3 +42,58 @@ r1();
 
 console.log('data.count next');
 data.count(111);
+
+// This is an empty reaction that's in the OFF state (since it has no subs)
+const lifeline = rx(() => {});
+// When this reaction (re)runs, it *doesn't* register AttachTest as a child.
+// Instead its adopted by `lifeline` who's responsible for handling the life of
+// inner reactions...
+console.log(`<div>
+  ${s => s(data.count)
+    ? adopt(lifeline, () => '<ComplexComponent/>')
+    : '<p>Nothing to show</p>'
+}
+</div>`);
+
+// Later...
+lifeline.pause();
+lifeline.unsubscribe();
+
+// This is useful for building router-like or cache-like systems that don't
+// recreate all sub connections each run. Here's one that's built into Haptic,
+// called when(), that's a router used to preserve DOM trees
+
+// Haptic's h engine isn't implemented here...
+const h = v => v;
+const when = (conditionFn, views) => {
+  const rendered = {};
+  const rxParents = {};
+  let condDisplayed;
+  return s => {
+    const cond = conditionFn(s);
+    if (cond === condDisplayed) {
+      return rendered[cond];
+    }
+    // Tick. Pause reactions. Keep DOM intact.
+    rxParents[condDisplayed].pause();
+    condDisplayed = cond;
+    // Rendered? Then Unpause. If nothing has changed then no sr/pr links change
+    if (rendered[cond]) {
+      rxParents[cond]();
+      return rendered[cond];
+    }
+    // Able to render?
+    if (views[cond]) {
+      const parent = rx(() => {});
+      rendered[cond] = adopt(parent, () => h(views[cond]));
+      rxParents[cond] = parent;
+      return rendered[cond];
+    }
+  };
+};
+console.log(`<div>
+  ${when(s => s(data.count) ? 'T' : 'F', {
+    T: () => '<ComplexComponent/>',
+    F: () => '<p>Nothing to show</p>',
+  })}
+</div>`);
