@@ -24,7 +24,7 @@ const rxCreate = (fn) => {
   rx.pause = () => _rxPause(rx);
   rx.unsubscribe = () => _rxUnsubscribe(rx);
   rxTree.set(rx, rxActive); // Maybe undefined; that's fine
-  if (rxActive) rxActive.inner.push(rx);
+  if (rxActive) rxActive.inner.add(rx);
   rx();
   return rx;
 };
